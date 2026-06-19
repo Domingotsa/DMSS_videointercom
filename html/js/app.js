@@ -8,9 +8,11 @@ const visitorDevice = document.querySelector('.visitor-device');
 const visitorFooterText = document.getElementById('visitor-footer-text');
 const btnHangup = document.getElementById('btn-hangup');
 const policeCaller = document.getElementById('police-caller');
+const policeCallerHint = document.getElementById('police-caller-hint');
 const policeClock = document.getElementById('police-clock');
 const policeDate = document.getElementById('police-date');
 const policeCamId = document.getElementById('police-cam-id');
+const cameraList = document.getElementById('camera-list');
 const btnAnswer = document.getElementById('btn-answer');
 const btnUnlock = document.getElementById('btn-unlock');
 const btnClose = document.getElementById('btn-close');
@@ -20,6 +22,7 @@ let visitorInterval = null;
 let policeClockInterval = null;
 let visitorSeconds = 0;
 let audioCtx = null;
+let camerasLocked = false;
 
 function postNui(event, data = {}) {
     const resourceName = (typeof GetParentResourceName === 'function')
@@ -135,7 +138,7 @@ function updateVisitorAnswered() {
     visitorDevice.classList.add('answered');
     visitorLedRed.classList.remove('active');
     visitorStatus.textContent = 'Centralino in ascolto';
-    visitorFooterText.textContent = 'Sei in linea con il centralino';
+    visitorFooterText.textContent = 'Parla al microfono · il centralino ti sente';
 }
 
 function hideVisitor() {
@@ -144,14 +147,78 @@ function hideVisitor() {
     stopVisitorTimer();
 }
 
+function renderCameraList(cameras, activeIndex) {
+    if (!cameraList) return;
+    cameraList.innerHTML = '';
+
+    if (!cameras || cameras.length === 0) return;
+
+    cameras.forEach((cam) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'camera-btn';
+        if (cam.index === activeIndex) btn.classList.add('active');
+        if (camerasLocked) btn.classList.add('disabled');
+        btn.textContent = cam.label || `CAM-${cam.index}`;
+        btn.disabled = camerasLocked;
+        btn.addEventListener('click', () => {
+            if (cam.index === activeIndex || camerasLocked) return;
+            postNui('switchCamera', { index: cam.index });
+        });
+        cameraList.appendChild(btn);
+    });
+}
+
+function updatePoliceCamera(data) {
+    policeCamId.textContent = data.camera || policeCamId.textContent;
+    if (data.lockCameras !== undefined) camerasLocked = data.lockCameras === true;
+    renderCameraList(data.cameras, data.activeCamera);
+}
+
+function updateIntercomUi(data) {
+    if (data.caller) policeCaller.textContent = data.caller;
+
+    if (data.callerHint && policeCallerHint) {
+        policeCallerHint.textContent = data.callerHint;
+    }
+
+    if (data.hasPendingCall !== undefined) {
+        btnAnswer.classList.toggle('hidden', !data.hasPendingCall);
+    }
+
+    if (data.canUnlock !== undefined) {
+        setUnlockEnabled(data.canUnlock === true);
+    }
+
+    if (data.lockCameras !== undefined) {
+        camerasLocked = data.lockCameras === true;
+        if (data.cameras) {
+            renderCameraList(data.cameras, data.activeCamera || 1);
+        }
+    }
+}
+
 function showPolice(data) {
-    policeCaller.textContent = data.caller || 'Sconosciuto';
-    policeCamId.textContent = data.camera || 'CAM-01 · INGRESSO PRINCIPALE';
+    camerasLocked = data.lockCameras === true;
+
+    policeCaller.textContent = data.caller || 'Nessuna chiamata';
+    policeCamId.textContent = data.camera || 'CAM-01 · INGRESSO SX';
+
+    if (policeCallerHint) {
+        if (data.canUnlock) {
+            policeCallerHint.textContent = 'In linea · parla al microfono';
+        } else if (data.hasPendingCall) {
+            policeCallerHint.textContent = 'Sta suonando all\'ingresso';
+        } else {
+            policeCallerHint.textContent = 'In attesa di un visitatore';
+        }
+    }
+
+    renderCameraList(data.cameras, data.activeCamera || 1);
     policePanel.classList.remove('hidden');
 
-    const answered = data.canUnlock === true;
-    btnAnswer.classList.toggle('hidden', answered);
-    setUnlockEnabled(answered);
+    btnAnswer.classList.toggle('hidden', !data.hasPendingCall);
+    setUnlockEnabled(data.canUnlock === true);
 
     startPoliceClock();
 }
@@ -160,6 +227,8 @@ function hidePolice() {
     policePanel.classList.add('hidden');
     btnAnswer.classList.add('hidden');
     setUnlockEnabled(false);
+    camerasLocked = false;
+    if (cameraList) cameraList.innerHTML = '';
     stopPoliceClock();
 }
 
@@ -178,6 +247,12 @@ window.addEventListener('message', (event) => {
             break;
         case 'showPolice':
             showPolice(data);
+            break;
+        case 'updateIntercom':
+            updateIntercomUi(data);
+            break;
+        case 'updateCamera':
+            updatePoliceCamera(data);
             break;
         case 'hidePolice':
             hidePolice();
