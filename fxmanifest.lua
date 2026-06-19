@@ -16,7 +16,6 @@ shared_scripts {
 
 client_scripts {
     'client.lua',
-    'client/editor.lua',
 }
 
 server_scripts {
@@ -26,9 +25,7 @@ server_scripts {
 files {
     'html/index.html',
     'html/css/style.css',
-    'html/css/editor.css',
     'html/js/app.js',
-    'html/js/editor.js',
 }
 
 dependencies {

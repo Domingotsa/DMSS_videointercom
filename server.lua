@@ -116,22 +116,6 @@ RegisterNetEvent('intercom:server:callTimeout', function()
     end
 end)
 
-lib.addCommand('intercomeditor', {
-    help = 'Apri editor posizionamento citofono',
-    restricted = false,
-}, function(source)
-    local ace = Config.EditorAce or 'command.intercomeditor'
-    if not IsPlayerAceAllowed(source, ace) and not IsPlayerAceAllowed(source, 'group.admin') then
-        exports.ox_lib:notify(source, {
-            title = 'Editor Citofono',
-            description = 'Non hai i permessi per usare l\'editor.',
-            type = 'error',
-        })
-        return
-    end
-    TriggerClientEvent('intercom:client:openEditor', source)
-end)
-
 lib.addCommand('citofono', {
     help = 'Rispondi al citofono e apri il feed video (alternativa al monitor)',
     restricted = 'group.police',
@@ -153,19 +137,4 @@ lib.addCommand('citofono', {
     clearPolicePendingCall()
     answeredByPolice = source
     TriggerClientEvent('intercom:client:openMonitor', source, lastCaller.name, true)
-end)
-
-RegisterNetEvent('intercom:server:requestEditor', function()
-    local src = source    local ace = Config.EditorAce or 'command.intercomeditor'
-
-    if not IsPlayerAceAllowed(src, ace) and not IsPlayerAceAllowed(src, 'group.admin') then
-        exports.ox_lib:notify(src, {
-            title = 'Editor Citofono',
-            description = 'Non hai i permessi per usare l\'editor.',
-            type = 'error',
-        })
-        return
-    end
-
-    TriggerClientEvent('intercom:client:openEditor', src)
 end)

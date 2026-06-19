@@ -6,8 +6,8 @@ local visitorCallAnswered = false
 local hasAnsweredCall = false
 local pendingCall = nil
 local monitorZoneActive = false
+local propZoneActive = false
 local visitorHintActive = false
-local editorActive = false
 
 local Sounds = {
     doorbell = { 'Door_Bell', 'DLC_HEIST_HACKING_SNAKE_SOUNDS' },
@@ -208,9 +208,9 @@ local function isNearIntercom()
 end
 
 local function applyPropRotation(entity, heading)
-    if Config.IntercomModel == `prop_ld_keypad_01` then
-        -- Tastierino: ruota sul muro (evita ombre/clip del vecchio pitch 90° su Y)
-        SetEntityRotation(entity, -90.0, 0.0, heading, 2, true)
+    local rot = Config.PropRotation or vec3(0.0, 0.0, 0.0)
+    if rot.x ~= 0.0 or rot.y ~= 0.0 then
+        SetEntityRotation(entity, rot.x, rot.y, heading + rot.z, 2, true)
     else
         SetEntityHeading(entity, heading)
     end
@@ -218,12 +218,17 @@ end
 
 local function deleteProp()
     if intercomProp and DoesEntityExist(intercomProp) then
-        pcall(function()
-            exports.ox_target:removeLocalEntity(intercomProp)
-        end)
         DeleteEntity(intercomProp)
     end
     intercomProp = nil
+end
+
+local function cleanupPropZone()
+    if not propZoneActive then return end
+    pcall(function()
+        exports.ox_target:removeZone('intercom_prop_zone')
+    end)
+    propZoneActive = false
 end
 
 local function waitAreaReady(x, y, z)
@@ -255,11 +260,13 @@ local function linkPropToInterior(entity, x, y, z)
 end
 
 local function getIntercomTargetOptions()
+    local distance = Config.InteractRadius or 1.2
     return {
         {
             name = 'intercom_ring',
             icon = 'fa-solid fa-bell',
             label = 'Suona Citofono',
+            distance = distance,
             canInteract = function()
                 return not isVisitorUiOpen
             end,
@@ -282,6 +289,7 @@ local function getIntercomTargetOptions()
             name = 'intercom_hangup',
             icon = 'fa-solid fa-phone-slash',
             label = 'Riaggancia',
+            distance = distance,
             canInteract = function()
                 return isVisitorUiOpen
             end,
@@ -290,8 +298,22 @@ local function getIntercomTargetOptions()
     }
 end
 
+local function setupPropZone()
+    cleanupPropZone()
+
+    local x, y, z = getPropCoords()
+    exports.ox_target:addSphereZone({
+        name = 'intercom_prop_zone',
+        coords = vec3(x, y, z),
+        radius = Config.InteractRadius or 1.2,
+        debug = Config.Debug,
+        options = getIntercomTargetOptions(),
+    })
+    propZoneActive = true
+end
+
 local function spawnProp()
-    if not Config.UseVisualProp or editorActive then return false end
+    if not Config.UseVisualProp then return false end
     if intercomProp and DoesEntityExist(intercomProp) then return true end
     if not isNearIntercom() then return false end
 
@@ -323,8 +345,6 @@ local function spawnProp()
     SetEntityLodDist(intercomProp, 500)
     linkPropToInterior(intercomProp, x, y, z)
     SetModelAsNoLongerNeeded(Config.IntercomModel)
-
-    exports.ox_target:addLocalEntity(intercomProp, getIntercomTargetOptions())
 
     if Config.Debug then
         print(('[DMSS_videointercom] Prop spawnato a %.2f, %.2f, %.2f'):format(x, y, z))
@@ -412,7 +432,9 @@ end
 local function refreshAll()
     deleteProp()
     cleanupPoliceMonitor()
+    cleanupPropZone()
     setupPoliceMonitor()
+    setupPropZone()
     if isNearIntercom() then
         spawnProp()
     end
@@ -423,6 +445,7 @@ local function cleanupIntercom()
     closeVisitorUi()
     SetNuiFocus(false, false)
     deleteProp()
+    cleanupPropZone()
     cleanupPoliceMonitor()
 end
 
@@ -434,9 +457,10 @@ CreateThread(function()
     while not cache.ped or cache.ped == 0 do Wait(500) end
 
     setupPoliceMonitor()
+    setupPropZone()
 
     while true do
-        if not editorActive and Config.UseVisualProp and isNearIntercom() then
+        if Config.UseVisualProp and isNearIntercom() then
             if not intercomProp or not DoesEntityExist(intercomProp) then
                 spawnProp()
             end
@@ -463,6 +487,7 @@ end)
 
 RegisterCommand('intercomrespawn', function()
     deleteProp()
+    setupPropZone()
     spawnProp()
 end, false)
 
@@ -528,14 +553,3 @@ RegisterNUICallback('answerCall', function(_, cb)
     if pendingCall then TriggerServerEvent('intercom:server:answerCall') end
     cb('ok')
 end)
-
-EditorAPI = {
-    setEditorActive = function(state) editorActive = state end,
-    getPropCoords = getPropCoords,
-    applyPropRotation = applyPropRotation,
-    deleteProp = deleteProp,
-    spawnProp = spawnProp,
-    refreshAll = refreshAll,
-    cleanupPoliceMonitor = cleanupPoliceMonitor,
-    setupPoliceMonitor = setupPoliceMonitor,
-}
