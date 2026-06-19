@@ -6,18 +6,6 @@ local visitorCallAnswered = false
 local hasAnsweredCall = false
 local pendingCall = nil
 
-local Config = {
-    IntercomProp = vec4(5629.6636, -3136.2673, 12.1455, 275.2273),
-    IntercomModel = `hei_prop_hei_keypad_03`,
-    -- Monitor polizia: punto dove aprire il menu (regola se serve)
-    PoliceMonitor = vec4(5627.8, -3135.5, 12.1455, 275.0),
-    CamOffset = vec3(0.5, -2.8, 1.6),
-    DoorlockId = 1,
-    LocationLabel = 'Centralino',
-    CameraLabel = 'CAM-01 · INGRESSO PRINCIPALE',
-    VisitorTimeout = 60000,
-}
-
 local Sounds = {
     doorbell = { 'Door_Bell', 'DLC_HEIST_HACKING_SNAKE_SOUNDS' },
     answer = { 'Phone_Generic_Key_03', 'Phone_SoundSet_Default' },
@@ -190,15 +178,65 @@ local function openPoliceMonitorMenu()
     lib.showContext('intercom_police_station_menu')
 end
 
+local function ensureAreaLoaded(x, y, z)
+    local interior = GetInteriorAtCoords(x, y, z)
+    if interior ~= 0 then
+        PinInteriorInMemory(interior)
+        LoadInterior(interior)
+        local timeout = GetGameTimer() + 10000
+        while not IsInteriorReady(interior) and GetGameTimer() < timeout do
+            Wait(0)
+        end
+    end
+
+    RequestCollisionAtCoord(x, y, z)
+    local timeout = GetGameTimer() + 5000
+    while not HasCollisionLoadedAroundEntity(cache.ped or PlayerPedId()) and GetGameTimer() < timeout do
+        RequestCollisionAtCoord(x, y, z)
+        Wait(0)
+    end
+end
+
+local function cleanupIntercomProp()
+    if intercomProp and DoesEntityExist(intercomProp) then
+        pcall(function()
+            exports.ox_target:removeLocalEntity(intercomProp)
+        end)
+        DeleteEntity(intercomProp)
+    end
+    intercomProp = nil
+end
+
+local function cleanupPoliceMonitor()
+    pcall(function()
+        exports.ox_target:removeZone('intercom_police_monitor')
+    end)
+end
+
 local function spawnIntercomProp()
-    lib.requestModel(Config.IntercomModel)
+    cleanupIntercomProp()
 
     local coords = Config.IntercomProp
-    intercomProp = CreateObject(Config.IntercomModel, coords.x, coords.y, coords.z, false, false, false)
+    ensureAreaLoaded(coords.x, coords.y, coords.z)
 
+    if not lib.requestModel(Config.IntercomModel, 10000) or not HasModelLoaded(Config.IntercomModel) then
+        print(('[DMSS_videointercom] Impossibile caricare il modello %s'):format(Config.IntercomModel))
+        return
+    end
+
+    intercomProp = CreateObject(Config.IntercomModel, coords.x, coords.y, coords.z, false, false, false)
+    if not intercomProp or intercomProp == 0 or not DoesEntityExist(intercomProp) then
+        print('[DMSS_videointercom] CreateObject fallito per il citofono')
+        SetModelAsNoLongerNeeded(Config.IntercomModel)
+        return
+    end
+
+    SetEntityAsMissionEntity(intercomProp, true, true)
     SetEntityHeading(intercomProp, coords.w)
     FreezeEntityPosition(intercomProp, true)
     SetEntityInvincible(intercomProp, true)
+    SetEntityCollision(intercomProp, true, true)
+    SetModelAsNoLongerNeeded(Config.IntercomModel)
 
     exports.ox_target:addLocalEntity(intercomProp, {
         {
@@ -236,6 +274,8 @@ local function spawnIntercomProp()
 end
 
 local function setupPoliceMonitor()
+    cleanupPoliceMonitor()
+
     local monitor = Config.PoliceMonitor
 
     exports.ox_target:addBoxZone({
@@ -287,20 +327,29 @@ local function openMonitor(callerName, answered)
     SetNuiFocus(true, true)
 end
 
-CreateThread(function()
+local function initIntercom()
     spawnIntercomProp()
     setupPoliceMonitor()
-end)
+end
+
+local function cleanupIntercom()
+    if isViewingCam then
+        closeMonitor(true)
+    end
+    if isVisitorUiOpen then
+        closeVisitorUi()
+        SetNuiFocus(false, false)
+    end
+    cleanupIntercomProp()
+    cleanupPoliceMonitor()
+end
 
 AddEventHandler('onResourceStop', function(resource)
     if resource ~= GetCurrentResourceName() then return end
-
-    if intercomProp and DoesEntityExist(intercomProp) then
-        exports.ox_target:removeLocalEntity(intercomProp)
-        DeleteEntity(intercomProp)
-        intercomProp = nil
-    end
+    cleanupIntercom()
 end)
+
+CreateThread(initIntercom)
 
 RegisterNetEvent('intercom:client:incomingCall', function(callerName)
     pendingCall = callerName

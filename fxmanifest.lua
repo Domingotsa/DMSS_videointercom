@@ -9,7 +9,10 @@ use_fxv2_oal 'yes'
 
 ui_page 'html/index.html'
 
-shared_script '@ox_lib/init.lua'
+shared_scripts {
+    '@ox_lib/init.lua',
+    'config.lua',
+}
 
 client_scripts {
     'client.lua'
