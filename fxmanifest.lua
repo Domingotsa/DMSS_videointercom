@@ -1,7 +1,7 @@
 fx_version 'cerulean'
 game 'gta5'
 
-author 'Gemini AI'
+author 'DMSS'
 description 'Sistema di citofono con telecamera integrata per Qbox e ox_doorlock'
 version '1.0.0'
 
@@ -15,7 +15,8 @@ shared_scripts {
 }
 
 client_scripts {
-    'client.lua'
+    'client.lua',
+    'client/editor.lua',
 }
 
 server_scripts {
@@ -25,7 +26,9 @@ server_scripts {
 files {
     'html/index.html',
     'html/css/style.css',
-    'html/js/app.js'
+    'html/css/editor.css',
+    'html/js/app.js',
+    'html/js/editor.js',
 }
 
 dependencies {

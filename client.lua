@@ -5,6 +5,9 @@ local isVisitorUiOpen = false
 local visitorCallAnswered = false
 local hasAnsweredCall = false
 local pendingCall = nil
+local monitorZoneActive = false
+local visitorHintActive = false
+local editorActive = false
 
 local Sounds = {
     doorbell = { 'Door_Bell', 'DLC_HEIST_HACKING_SNAKE_SOUNDS' },
@@ -28,20 +31,6 @@ local function isPoliceOnDuty()
         and playerData.job.onduty
 end
 
-local function getCamPosition()
-    if intercomProp and DoesEntityExist(intercomProp) then
-        local camPos = GetOffsetFromEntityInWorldCoords(intercomProp, Config.CamOffset.x, Config.CamOffset.y, Config.CamOffset.z)
-        return vec4(camPos.x, camPos.y, camPos.z, Config.IntercomProp.w)
-    end
-
-    return vec4(
-        Config.IntercomProp.x + Config.CamOffset.x,
-        Config.IntercomProp.y + Config.CamOffset.y,
-        Config.IntercomProp.z + Config.CamOffset.z,
-        Config.IntercomProp.w
-    )
-end
-
 local function sendNui(action, data)
     SendNUIMessage({
         action = action,
@@ -49,13 +38,38 @@ local function sendNui(action, data)
         caller = data and data.caller,
         camera = data and data.camera,
         canUnlock = data and data.canUnlock,
+        sound = data and data.sound,
     })
+end
+
+local function showVisitorHint()
+    if visitorHintActive then return end
+    visitorHintActive = true
+    lib.showTextUI('[BACKSPACE] Riaggancia  ·  [ESC] Chiudi chiamata', {
+        position = 'bottom-center',
+        icon = 'phone-slash',
+    })
+end
+
+local function hideVisitorHint()
+    if not visitorHintActive then return end
+    visitorHintActive = false
+    lib.hideTextUI()
+end
+
+local function releasePlayerControls()
+    local ped = cache.ped
+    if not ped or ped == 0 then return end
+    FreezeEntityPosition(ped, false)
+    ClearPedTasks(ped)
 end
 
 local function closeVisitorUi()
     if not isVisitorUiOpen then return end
     isVisitorUiOpen = false
     visitorCallAnswered = false
+    hideVisitorHint()
+    releasePlayerControls()
     sendNui('hideVisitor')
 end
 
@@ -67,6 +81,7 @@ local function openVisitorUi()
     playIntercomSound('ring')
     sendNui('showVisitor', { location = Config.LocationLabel })
     sendNui('playSound', { sound = 'ring' })
+    showVisitorHint()
 
     SetTimeout(Config.VisitorTimeout, function()
         if isVisitorUiOpen then
@@ -178,26 +193,30 @@ local function openPoliceMonitorMenu()
     lib.showContext('intercom_police_station_menu')
 end
 
-local function ensureAreaLoaded(x, y, z)
-    local interior = GetInteriorAtCoords(x, y, z)
-    if interior ~= 0 then
-        PinInteriorInMemory(interior)
-        LoadInterior(interior)
-        local timeout = GetGameTimer() + 10000
-        while not IsInteriorReady(interior) and GetGameTimer() < timeout do
-            Wait(0)
-        end
-    end
+-- ── Prop ────────────────────────────────────────────────────────────
 
-    RequestCollisionAtCoord(x, y, z)
-    local timeout = GetGameTimer() + 5000
-    while not HasCollisionLoadedAroundEntity(cache.ped or PlayerPedId()) and GetGameTimer() < timeout do
-        RequestCollisionAtCoord(x, y, z)
-        Wait(0)
+local function getPropCoords()
+    local p = Config.IntercomProp
+    local o = Config.PropOffset or vec3(0.0, 0.0, 0.0)
+    local world = GetOffsetFromCoordAndHeadingInWorldCoords(p.x, p.y, p.z, p.w, o.x, o.y, o.z)
+    return world.x, world.y, world.z, p.w
+end
+
+local function isNearIntercom()
+    local p = Config.IntercomProp
+    return #(GetEntityCoords(cache.ped) - vec3(p.x, p.y, p.z)) <= (Config.SpawnDistance or 80.0)
+end
+
+local function applyPropRotation(entity, heading)
+    if Config.IntercomModel == `prop_ld_keypad_01` then
+        -- Tastierino: ruota sul muro (evita ombre/clip del vecchio pitch 90° su Y)
+        SetEntityRotation(entity, -90.0, 0.0, heading, 2, true)
+    else
+        SetEntityHeading(entity, heading)
     end
 end
 
-local function cleanupIntercomProp()
+local function deleteProp()
     if intercomProp and DoesEntityExist(intercomProp) then
         pcall(function()
             exports.ox_target:removeLocalEntity(intercomProp)
@@ -207,38 +226,36 @@ local function cleanupIntercomProp()
     intercomProp = nil
 end
 
-local function cleanupPoliceMonitor()
-    pcall(function()
-        exports.ox_target:removeZone('intercom_police_monitor')
-    end)
+local function waitAreaReady(x, y, z)
+    RequestCollisionAtCoord(x, y, z)
+
+    local interior = GetInteriorAtCoords(x, y, z)
+    if interior ~= 0 then
+        PinInteriorInMemory(interior)
+        local deadline = GetGameTimer() + 5000
+        while not IsInteriorReady(interior) and GetGameTimer() < deadline do
+            Wait(50)
+        end
+    end
+
+    local deadline = GetGameTimer() + 3000
+    while not HasCollisionLoadedAroundEntity(cache.ped) and GetGameTimer() < deadline do
+        Wait(50)
+    end
 end
 
-local function spawnIntercomProp()
-    cleanupIntercomProp()
+local function linkPropToInterior(entity, x, y, z)
+    local interior = GetInteriorAtCoords(x, y, z)
+    if interior == 0 then return end
 
-    local coords = Config.IntercomProp
-    ensureAreaLoaded(coords.x, coords.y, coords.z)
-
-    if not lib.requestModel(Config.IntercomModel, 10000) or not HasModelLoaded(Config.IntercomModel) then
-        print(('[DMSS_videointercom] Impossibile caricare il modello %s'):format(Config.IntercomModel))
-        return
+    local room = GetRoomKeyFromEntity(cache.ped)
+    if room ~= 0 then
+        ForceRoomForEntity(entity, interior, room)
     end
+end
 
-    intercomProp = CreateObject(Config.IntercomModel, coords.x, coords.y, coords.z, false, false, false)
-    if not intercomProp or intercomProp == 0 or not DoesEntityExist(intercomProp) then
-        print('[DMSS_videointercom] CreateObject fallito per il citofono')
-        SetModelAsNoLongerNeeded(Config.IntercomModel)
-        return
-    end
-
-    SetEntityAsMissionEntity(intercomProp, true, true)
-    SetEntityHeading(intercomProp, coords.w)
-    FreezeEntityPosition(intercomProp, true)
-    SetEntityInvincible(intercomProp, true)
-    SetEntityCollision(intercomProp, true, true)
-    SetModelAsNoLongerNeeded(Config.IntercomModel)
-
-    exports.ox_target:addLocalEntity(intercomProp, {
+local function getIntercomTargetOptions()
+    return {
         {
             name = 'intercom_ring',
             icon = 'fa-solid fa-bell',
@@ -270,32 +287,99 @@ local function spawnIntercomProp()
             end,
             onSelect = hangUpCall,
         },
-    })
+    }
+end
+
+local function spawnProp()
+    if not Config.UseVisualProp or editorActive then return false end
+    if intercomProp and DoesEntityExist(intercomProp) then return true end
+    if not isNearIntercom() then return false end
+
+    deleteProp()
+
+    local x, y, z, heading = getPropCoords()
+    waitAreaReady(x, y, z)
+
+    if not lib.requestModel(Config.IntercomModel, 5000) then
+        print(('[DMSS_videointercom] Modello non caricato: %s'):format(Config.IntercomModel))
+        return false
+    end
+
+    intercomProp = CreateObject(Config.IntercomModel, x, y, z, false, false, false)
+    if not intercomProp or intercomProp == 0 or not DoesEntityExist(intercomProp) then
+        print('[DMSS_videointercom] CreateObject fallito')
+        SetModelAsNoLongerNeeded(Config.IntercomModel)
+        return false
+    end
+
+    SetEntityAsMissionEntity(intercomProp, true, true)
+    SetEntityCoordsNoOffset(intercomProp, x, y, z, false, false, false)
+    applyPropRotation(intercomProp, heading)
+    ResetEntityAlpha(intercomProp)
+    SetEntityVisible(intercomProp, true, false)
+    SetEntityCollision(intercomProp, false, false)
+    FreezeEntityPosition(intercomProp, true)
+    SetEntityInvincible(intercomProp, true)
+    SetEntityLodDist(intercomProp, 500)
+    linkPropToInterior(intercomProp, x, y, z)
+    SetModelAsNoLongerNeeded(Config.IntercomModel)
+
+    exports.ox_target:addLocalEntity(intercomProp, getIntercomTargetOptions())
+
+    if Config.Debug then
+        print(('[DMSS_videointercom] Prop spawnato a %.2f, %.2f, %.2f'):format(x, y, z))
+    end
+
+    return true
+end
+
+local function getCamPosition()
+    local x, y, z, heading = getPropCoords()
+
+    if intercomProp and DoesEntityExist(intercomProp) then
+        local camPos = GetOffsetFromEntityInWorldCoords(intercomProp, Config.CamOffset.x, Config.CamOffset.y, Config.CamOffset.z)
+        return vec4(camPos.x, camPos.y, camPos.z, heading)
+    end
+
+    local camWorld = GetOffsetFromCoordAndHeadingInWorldCoords(
+        x, y, z, heading,
+        Config.CamOffset.x, Config.CamOffset.y, Config.CamOffset.z
+    )
+    return vec4(camWorld.x, camWorld.y, camWorld.z, heading)
 end
 
 local function setupPoliceMonitor()
-    cleanupPoliceMonitor()
+    if monitorZoneActive then return end
 
-    local monitor = Config.PoliceMonitor
+    local m = Config.PoliceMonitor
+    local size = Config.PoliceMonitorSize or vec3(0.8, 0.8, 1.2)
 
     exports.ox_target:addBoxZone({
         name = 'intercom_police_monitor',
-        coords = vec3(monitor.x, monitor.y, monitor.z),
-        size = vec3(1.2, 1.2, 1.5),
-        rotation = monitor.w,
-        debug = false,
+        coords = vec3(m.x, m.y, m.z),
+        size = size,
+        rotation = m.w,
+        debug = Config.Debug,
         options = {
             {
                 name = 'intercom_monitor_use',
                 icon = 'fa-solid fa-desktop',
                 label = 'Monitor Centralino',
-                canInteract = function()
-                    return isPoliceOnDuty()
-                end,
+                canInteract = isPoliceOnDuty,
                 onSelect = openPoliceMonitorMenu,
             },
         },
     })
+
+    monitorZoneActive = true
+end
+
+local function cleanupPoliceMonitor()
+    if not monitorZoneActive then return end
+    pcall(function()
+        exports.ox_target:removeZone('intercom_police_monitor')
+    end)
+    monitorZoneActive = false
 end
 
 local function openMonitor(callerName, answered)
@@ -311,10 +395,8 @@ local function openMonitor(callerName, answered)
     intercomCam = CreateCamWithParams('DEFAULT_SCRIPTED_CAMERA', camPos.x, camPos.y, camPos.z, 0.0, 0.0, camPos.w, 60.0, false, 0)
     SetCamActive(intercomCam, true)
     RenderScriptCams(true, false, 0, true, true)
-
     SetTimecycleModifier('scanline_cam_cheap')
     SetTimecycleModifierStrength(1.2)
-
     DoScreenFadeIn(400)
 
     playIntercomSound('cctvOn')
@@ -327,35 +409,77 @@ local function openMonitor(callerName, answered)
     SetNuiFocus(true, true)
 end
 
-local function initIntercom()
-    spawnIntercomProp()
+local function refreshAll()
+    deleteProp()
+    cleanupPoliceMonitor()
     setupPoliceMonitor()
+    if isNearIntercom() then
+        spawnProp()
+    end
 end
 
 local function cleanupIntercom()
-    if isViewingCam then
-        closeMonitor(true)
-    end
-    if isVisitorUiOpen then
-        closeVisitorUi()
-        SetNuiFocus(false, false)
-    end
-    cleanupIntercomProp()
+    if isViewingCam then closeMonitor(true) end
+    closeVisitorUi()
+    SetNuiFocus(false, false)
+    deleteProp()
     cleanupPoliceMonitor()
 end
+
+-- ── Init ────────────────────────────────────────────────────────────
+
+CreateThread(function()
+    while not NetworkIsSessionStarted() do Wait(500) end
+    while GetResourceState('ox_target') ~= 'started' do Wait(100) end
+    while not cache.ped or cache.ped == 0 do Wait(500) end
+
+    setupPoliceMonitor()
+
+    while true do
+        if not editorActive and Config.UseVisualProp and isNearIntercom() then
+            if not intercomProp or not DoesEntityExist(intercomProp) then
+                spawnProp()
+            end
+            Wait(2000)
+        else
+            Wait(3000)
+        end
+    end
+end)
+
+-- Tasti riaggancia durante chiamata (player libero di muoversi)
+CreateThread(function()
+    while true do
+        if isVisitorUiOpen then
+            if IsControlJustPressed(0, 194) or IsControlJustPressed(0, 322) then
+                hangUpCall()
+            end
+            Wait(0)
+        else
+            Wait(400)
+        end
+    end
+end)
+
+RegisterCommand('intercomrespawn', function()
+    deleteProp()
+    spawnProp()
+end, false)
+
+RegisterCommand('intercomrefresh', function()
+    refreshAll()
+    exports.ox_lib:notify({ title = 'Citofono', description = 'Citofono aggiornato', type = 'success' })
+end, false)
 
 AddEventHandler('onResourceStop', function(resource)
     if resource ~= GetCurrentResourceName() then return end
     cleanupIntercom()
 end)
 
-CreateThread(initIntercom)
-
 RegisterNetEvent('intercom:client:incomingCall', function(callerName)
     pendingCall = callerName
     playIntercomSound('doorbell')
     sendNui('playSound', { sound = 'doorbell' })
-
     exports.ox_lib:notify({
         title = '🔔 CITOFONO CENTRALINO',
         description = ('**%s** sta suonando! Vai al monitor e rispondi.'):format(callerName),
@@ -364,14 +488,8 @@ RegisterNetEvent('intercom:client:incomingCall', function(callerName)
     })
 end)
 
-RegisterNetEvent('intercom:client:clearPendingCall', function()
-    pendingCall = nil
-end)
-
-RegisterNetEvent('intercom:client:openMonitor', function(callerName, answered)
-    openMonitor(callerName, answered)
-end)
-
+RegisterNetEvent('intercom:client:clearPendingCall', function() pendingCall = nil end)
+RegisterNetEvent('intercom:client:openMonitor', openMonitor)
 RegisterNetEvent('intercom:client:closeMonitor', closeMonitor)
 
 RegisterNetEvent('intercom:client:callAnswered', function()
@@ -387,13 +505,10 @@ RegisterNetEvent('intercom:client:callEnded', function()
     closeVisitorUi()
 end)
 
-RegisterNetEvent('intercom:client:playSound', function(soundKey)
-    playIntercomSound(soundKey)
-end)
+RegisterNetEvent('intercom:client:playSound', playIntercomSound)
 
 RegisterNetEvent('intercom:client:forceCloseMonitor', function()
     if not isViewingCam then return end
-
     playIntercomSound('callEnd')
     closeMonitor(true)
     exports.ox_lib:notify({ title = 'Citofono', description = 'Il visitatore ha riagganciato.', type = 'inform' })
@@ -401,31 +516,26 @@ end)
 
 RegisterNetEvent('intercom:client:visitorHungUp', function()
     pendingCall = nil
-
     if not isViewingCam then
         exports.ox_lib:notify({ title = 'Citofono', description = 'Il visitatore ha riagganciato.', type = 'inform' })
     end
 end)
 
-RegisterNUICallback('hangUpCall', function(_, cb)
-    hangUpCall()
-    cb('ok')
-end)
-
-RegisterNUICallback('unlockDoor', function(_, cb)
-    unlockDoorFromMonitor()
-    cb('ok')
-end)
-
-RegisterNUICallback('closeMonitor', function(_, cb)
-    playIntercomSound('callEnd')
-    closeMonitor()
-    cb('ok')
-end)
-
+RegisterNUICallback('hangUpCall', function(_, cb) hangUpCall() cb('ok') end)
+RegisterNUICallback('unlockDoor', function(_, cb) unlockDoorFromMonitor() cb('ok') end)
+RegisterNUICallback('closeMonitor', function(_, cb) playIntercomSound('callEnd') closeMonitor() cb('ok') end)
 RegisterNUICallback('answerCall', function(_, cb)
-    if pendingCall then
-        TriggerServerEvent('intercom:server:answerCall')
-    end
+    if pendingCall then TriggerServerEvent('intercom:server:answerCall') end
     cb('ok')
 end)
+
+EditorAPI = {
+    setEditorActive = function(state) editorActive = state end,
+    getPropCoords = getPropCoords,
+    applyPropRotation = applyPropRotation,
+    deleteProp = deleteProp,
+    spawnProp = spawnProp,
+    refreshAll = refreshAll,
+    cleanupPoliceMonitor = cleanupPoliceMonitor,
+    setupPoliceMonitor = setupPoliceMonitor,
+}

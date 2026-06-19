@@ -14,6 +14,7 @@ const policeCamId = document.getElementById('police-cam-id');
 const btnAnswer = document.getElementById('btn-answer');
 const btnUnlock = document.getElementById('btn-unlock');
 const btnClose = document.getElementById('btn-close');
+const visitorHangupHint = document.getElementById('visitor-hangup-hint');
 
 let visitorInterval = null;
 let policeClockInterval = null;
@@ -21,7 +22,10 @@ let visitorSeconds = 0;
 let audioCtx = null;
 
 function postNui(event, data = {}) {
-    fetch(`https://${GetParentResourceName()}/${event}`, {
+    const resourceName = (typeof GetParentResourceName === 'function')
+        ? GetParentResourceName()
+        : 'dmss_videointercom';
+    fetch(`https://${resourceName}/${event}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -39,30 +43,38 @@ function playUiTone(type) {
     const ctx = getAudioContext();
 
     const tones = {
-        ring: { freq: 880, duration: 0.15, repeat: 2, gap: 0.2 },
+        ring:     { freq: 880, duration: 0.15, repeat: 2, gap: 0.2  },
         doorbell: { freq: 660, duration: 0.25, repeat: 2, gap: 0.15 },
-        answer: { freq: 523, duration: 0.12, repeat: 1, gap: 0 },
-        cctvOn: { freq: 440, duration: 0.08, repeat: 1, gap: 0 },
-        unlock: { freq: 784, duration: 0.2, repeat: 2, gap: 0.1 },
-        callEnd: { freq: 330, duration: 0.3, repeat: 1, gap: 0 },
+        answer:   { freq: 523, duration: 0.12, repeat: 1, gap: 0    },
+        cctvOn:   { freq: 440, duration: 0.08, repeat: 1, gap: 0    },
+        unlock:   { freq: 784, duration: 0.2,  repeat: 2, gap: 0.1  },
+        callEnd:  { freq: 330, duration: 0.3,  repeat: 1, gap: 0    },
     };
 
     const tone = tones[type] || tones.answer;
-    let start = ctx.currentTime;
 
-    for (let i = 0; i < tone.repeat; i += 1) {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type = 'sine';
-        o.frequency.value = tone.freq + (i * 40);
-        o.connect(g);
-        g.connect(ctx.destination);
-        g.gain.setValueAtTime(0.0001, start);
-        g.gain.exponentialRampToValueAtTime(0.08, start + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, start + tone.duration);
-        o.start(start);
-        o.stop(start + tone.duration);
-        start += tone.duration + tone.gap;
+    const play = () => {
+        let start = ctx.currentTime;
+        for (let i = 0; i < tone.repeat; i += 1) {
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'sine';
+            o.frequency.value = tone.freq + (i * 40);
+            o.connect(g);
+            g.connect(ctx.destination);
+            g.gain.setValueAtTime(0.0001, start);
+            g.gain.exponentialRampToValueAtTime(0.08, start + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001, start + tone.duration);
+            o.start(start);
+            o.stop(start + tone.duration);
+            start += tone.duration + tone.gap;
+        }
+    };
+
+    if (ctx.state === 'suspended') {
+        ctx.resume().then(play);
+    } else {
+        play();
     }
 }
 
@@ -115,6 +127,7 @@ function showVisitor(data) {
     visitorLocation.textContent = data.location || 'Centralino';
     visitorFooterText.textContent = 'In attesa di risposta dal personale';
     visitorPanel.classList.remove('hidden');
+    if (visitorHangupHint) visitorHangupHint.classList.remove('hidden');
     startVisitorTimer();
 }
 
@@ -127,6 +140,7 @@ function updateVisitorAnswered() {
 
 function hideVisitor() {
     visitorPanel.classList.add('hidden');
+    if (visitorHangupHint) visitorHangupHint.classList.add('hidden');
     stopVisitorTimer();
 }
 

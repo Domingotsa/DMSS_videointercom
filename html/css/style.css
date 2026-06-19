@@ -25,9 +25,11 @@ body {
 
 #visitor-panel {
     display: flex;
-    align-items: flex-end;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
     padding-bottom: 8vh;
+    pointer-events: none;
 }
 
 .visitor-device {
@@ -209,6 +211,36 @@ body {
 .btn-hangup svg {
     width: 16px;
     height: 16px;
+}
+
+.visitor-hangup-hint {
+    pointer-events: none;
+    margin-top: 10px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 11px;
+    color: #94a3b8;
+    letter-spacing: 0.04em;
+    animation: slideUp 0.45s ease-out 0.12s both;
+}
+
+.visitor-hangup-hint kbd {
+    display: inline-block;
+    padding: 2px 6px;
+    margin: 0 2px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+    font-family: 'Consolas', monospace;
+    font-size: 10px;
+    color: #e2e8f0;
+}
+
+.visitor-hangup-hint .hint-sep {
+    margin: 0 8px;
+    opacity: 0.45;
 }
 
 .btn-hangup:hover {

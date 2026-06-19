@@ -1,23 +1,26 @@
 Config = {}
 
--- Prop 3D del citofono (x, y, z, heading)
-Config.IntercomProp = vec4(5629.6636, -3136.2673, 12.1455, 275.2273)
+-- Citofono: punto base + heading muro
+Config.IntercomProp = vec4(5611.8848, -3122.9387, 8.6942, 268.0362)
 
--- Modello GTA del citofono
-Config.IntercomModel = `hei_prop_hei_keypad_03`
+-- Offset locale (avanti = staccato dal muro, destra, alto)
+Config.PropOffset = vec3(0.12, 0.0, 1.1)
 
--- Punto monitor polizia: dove aprire il menu centralino (x, y, z, rotation)
-Config.PoliceMonitor = vec4(5627.8, -3135.5, 12.1455, 275.0)
+-- prop_gatecom_01 = citofono verticale | prop_ld_keypad_01 = tastierino
+Config.IntercomModel = `prop_ld_keypad_01`
 
--- Offset telecamera rispetto al prop (x, y, z)
+Config.UseVisualProp = true
+Config.InteractRadius = 1.0
+Config.SpawnDistance = 80.0
+
+-- Monitor polizia
+Config.PoliceMonitor = vec4(5627.8, -3135.5, 11.1454, 275.0)
+Config.PoliceMonitorSize = vec3(0.8, 0.8, 1.2)
+
 Config.CamOffset = vec3(0.5, -2.8, 1.6)
-
--- ID serratura in ox_doorlock
 Config.DoorlockId = 1
-
--- Etichette UI
 Config.LocationLabel = 'Centralino'
 Config.CameraLabel = 'CAM-01 · INGRESSO PRINCIPALE'
-
--- Timeout attesa risposta visitatore (ms)
 Config.VisitorTimeout = 60000
+Config.Debug = false
+Config.EditorAce = 'command.intercomeditor'

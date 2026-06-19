@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DMSS Citofono</title>
     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/editor.css">
 </head>
 <body>
     <!-- Pannello visitatore: mostrato dopo aver suonato -->
@@ -41,6 +42,11 @@
                     Riaggancia
                 </button>
             </div>
+        </div>
+        <div id="visitor-hangup-hint" class="visitor-hangup-hint hidden">
+            <kbd>BACKSPACE</kbd> Riaggancia chiamata
+            <span class="hint-sep">·</span>
+            <kbd>ESC</kbd> Chiudi
         </div>
     </div>
 
@@ -109,6 +115,22 @@
         </div>
     </div>
 
+    <div id="editor-overlay">
+        <div class="editor-crosshair"></div>
+        <div class="editor-panel">
+            <h2 id="editor-mode-title">Editor Prop</h2>
+            <p>Usa il puntatore del mouse per posizionare.</p>
+            <ul id="editor-help-list"></ul>
+            <div class="editor-actions">
+                <button type="button" class="btn-save" id="editor-save">Salva</button>
+                <button type="button" class="btn-snap" id="editor-snap">Snap muro</button>
+                <button type="button" class="btn-cancel" id="editor-cancel">Annulla</button>
+            </div>
+        </div>
+        <div class="editor-hit-label" id="editor-hit-label">Punta il muro e clicca</div>
+    </div>
+
     <script src="js/app.js"></script>
+    <script src="js/editor.js"></script>
 </body>
 </html>
