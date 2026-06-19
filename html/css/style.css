@@ -175,11 +175,54 @@ body {
 }
 
 .visitor-footer {
-    padding: 10px 16px;
+    padding: 12px 16px 14px;
     border-top: 1px solid #2a3140;
     text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.visitor-footer span {
     font-size: 11px;
     color: #475569;
+}
+
+.btn-hangup {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: 8px;
+    background: rgba(239, 68, 68, 0.12);
+    color: #f87171;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.btn-hangup svg {
+    width: 16px;
+    height: 16px;
+}
+
+.btn-hangup:hover {
+    background: rgba(239, 68, 68, 0.22);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.2);
+}
+
+.btn-hangup:active {
+    transform: translateY(0);
+}
+
+.visitor-device.answered .btn-hangup {
+    border-color: rgba(248, 113, 113, 0.5);
 }
 
 .visitor-device.answered .visitor-icon {

@@ -5,6 +5,8 @@ const visitorLocation = document.getElementById('visitor-location');
 const visitorTimer = document.getElementById('visitor-timer');
 const visitorLedRed = document.getElementById('visitor-led-red');
 const visitorDevice = document.querySelector('.visitor-device');
+const visitorFooterText = document.getElementById('visitor-footer-text');
+const btnHangup = document.getElementById('btn-hangup');
 const policeCaller = document.getElementById('police-caller');
 const policeClock = document.getElementById('police-clock');
 const policeDate = document.getElementById('police-date');
@@ -111,6 +113,7 @@ function showVisitor(data) {
     visitorLedRed.classList.add('active');
     visitorStatus.textContent = 'In attesa di risposta...';
     visitorLocation.textContent = data.location || 'Centralino';
+    visitorFooterText.textContent = 'In attesa di risposta dal personale';
     visitorPanel.classList.remove('hidden');
     startVisitorTimer();
 }
@@ -119,6 +122,7 @@ function updateVisitorAnswered() {
     visitorDevice.classList.add('answered');
     visitorLedRed.classList.remove('active');
     visitorStatus.textContent = 'Centralino in ascolto';
+    visitorFooterText.textContent = 'Sei in linea con il centralino';
 }
 
 function hideVisitor() {
@@ -174,6 +178,7 @@ window.addEventListener('message', (event) => {
     }
 });
 
+btnHangup.addEventListener('click', () => postNui('hangUpCall'));
 btnAnswer.addEventListener('click', () => postNui('answerCall'));
 btnUnlock.addEventListener('click', () => {
     if (!btnUnlock.disabled) postNui('unlockDoor');
@@ -181,6 +186,11 @@ btnUnlock.addEventListener('click', () => {
 btnClose.addEventListener('click', () => postNui('closeMonitor'));
 
 document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !visitorPanel.classList.contains('hidden')) {
+        postNui('hangUpCall');
+        return;
+    }
+
     if (e.key === 'Escape' && !policePanel.classList.contains('hidden')) {
         postNui('closeMonitor');
     }

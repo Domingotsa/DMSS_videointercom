@@ -2,6 +2,7 @@ local intercomCam = nil
 local intercomProp = nil
 local isViewingCam = false
 local isVisitorUiOpen = false
+local visitorCallAnswered = false
 local hasAnsweredCall = false
 local pendingCall = nil
 
@@ -63,9 +64,17 @@ local function sendNui(action, data)
     })
 end
 
+local function closeVisitorUi()
+    if not isVisitorUiOpen then return end
+    isVisitorUiOpen = false
+    visitorCallAnswered = false
+    sendNui('hideVisitor')
+end
+
 local function openVisitorUi()
     if isVisitorUiOpen then return end
     isVisitorUiOpen = true
+    visitorCallAnswered = false
 
     playIntercomSound('ring')
     sendNui('showVisitor', { location = Config.LocationLabel })
@@ -81,13 +90,17 @@ local function openVisitorUi()
     end)
 end
 
-local function closeVisitorUi()
+local function hangUpCall()
     if not isVisitorUiOpen then return end
-    isVisitorUiOpen = false
-    sendNui('hideVisitor')
+
+    TriggerServerEvent('intercom:server:hangUpCall')
+    playIntercomSound('callEnd')
+    sendNui('playSound', { sound = 'callEnd' })
+    closeVisitorUi()
+    exports.ox_lib:notify({ title = 'Citofono', description = 'Hai riagganciato.', type = 'inform' })
 end
 
-local function closeMonitor()
+local function closeMonitor(skipServer)
     if not isViewingCam then return end
 
     sendNui('hidePolice')
@@ -104,7 +117,10 @@ local function closeMonitor()
     hasAnsweredCall = false
 
     DoScreenFadeIn(300)
-    TriggerServerEvent('intercom:server:monitorClosed')
+
+    if not skipServer then
+        TriggerServerEvent('intercom:server:monitorClosed')
+    end
 end
 
 local function unlockDoorFromMonitor()
@@ -189,6 +205,9 @@ local function spawnIntercomProp()
             name = 'intercom_ring',
             icon = 'fa-solid fa-bell',
             label = 'Suona Citofono',
+            canInteract = function()
+                return not isVisitorUiOpen
+            end,
             onSelect = function()
                 if LocalPlayer.state.intercomCooldown then
                     exports.ox_lib:notify({ title = 'Citofono', description = 'Hai già suonato, attendi un momento.', type = 'error' })
@@ -203,6 +222,15 @@ local function spawnIntercomProp()
                     LocalPlayer.state:set('intercomCooldown', false, false)
                 end)
             end,
+        },
+        {
+            name = 'intercom_hangup',
+            icon = 'fa-solid fa-phone-slash',
+            label = 'Riaggancia',
+            canInteract = function()
+                return isVisitorUiOpen
+            end,
+            onSelect = hangUpCall,
         },
     })
 end
@@ -298,6 +326,7 @@ end)
 RegisterNetEvent('intercom:client:closeMonitor', closeMonitor)
 
 RegisterNetEvent('intercom:client:callAnswered', function()
+    visitorCallAnswered = true
     playIntercomSound('answer')
     sendNui('visitorAnswered')
     sendNui('playSound', { sound = 'answer' })
@@ -311,6 +340,27 @@ end)
 
 RegisterNetEvent('intercom:client:playSound', function(soundKey)
     playIntercomSound(soundKey)
+end)
+
+RegisterNetEvent('intercom:client:forceCloseMonitor', function()
+    if not isViewingCam then return end
+
+    playIntercomSound('callEnd')
+    closeMonitor(true)
+    exports.ox_lib:notify({ title = 'Citofono', description = 'Il visitatore ha riagganciato.', type = 'inform' })
+end)
+
+RegisterNetEvent('intercom:client:visitorHungUp', function()
+    pendingCall = nil
+
+    if not isViewingCam then
+        exports.ox_lib:notify({ title = 'Citofono', description = 'Il visitatore ha riagganciato.', type = 'inform' })
+    end
+end)
+
+RegisterNUICallback('hangUpCall', function(_, cb)
+    hangUpCall()
+    cb('ok')
 end)
 
 RegisterNUICallback('unlockDoor', function(_, cb)

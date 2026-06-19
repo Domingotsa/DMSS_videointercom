@@ -5,18 +5,11 @@ local lastCaller = {
     name = nil,
 }
 
+local answeredByPolice = nil
+
 local function getOnDutyPolice()
-    local onDuty = {}
-
-    for _, policeSrc in ipairs(qbx:GetPlayersByJob('police')) do
-        local policePlayer = qbx:GetPlayer(policeSrc)
-
-        if policePlayer and policePlayer.PlayerData.job.onduty then
-            onDuty[#onDuty + 1] = policeSrc
-        end
-    end
-
-    return onDuty
+    local _, players = exports.qbx_core:GetDutyCountJob('police')
+    return players or {}
 end
 
 local function notifyOnDutyPolice(event, ...)
@@ -46,6 +39,7 @@ RegisterNetEvent('intercom:server:ringDoorbell', function()
     local callerName = charInfo.firstname .. ' ' .. charInfo.lastname
 
     lastCaller = { src = src, name = callerName }
+    answeredByPolice = nil
 
     notifyOnDutyPolice('intercom:client:incomingCall', callerName)
 end)
@@ -64,7 +58,24 @@ RegisterNetEvent('intercom:server:answerCall', function()
     TriggerClientEvent('intercom:client:playSound', lastCaller.src, 'answer')
 
     clearPolicePendingCall()
+    answeredByPolice = src
     TriggerClientEvent('intercom:client:openMonitor', src, lastCaller.name, true)
+end)
+
+RegisterNetEvent('intercom:server:hangUpCall', function()
+    local src = source
+
+    if lastCaller.src ~= src then return end
+
+    if answeredByPolice then
+        TriggerClientEvent('intercom:client:forceCloseMonitor', answeredByPolice)
+    end
+
+    notifyOnDutyPolice('intercom:client:visitorHungUp')
+    clearPolicePendingCall()
+
+    lastCaller = { src = nil, name = nil }
+    answeredByPolice = nil
 end)
 
 RegisterNetEvent('intercom:server:unlockDoor', function(doorId)
@@ -82,6 +93,7 @@ RegisterNetEvent('intercom:server:unlockDoor', function(doorId)
     end
 
     lastCaller = { src = nil, name = nil }
+    answeredByPolice = nil
 end)
 
 RegisterNetEvent('intercom:server:monitorClosed', function()
@@ -90,6 +102,7 @@ RegisterNetEvent('intercom:server:monitorClosed', function()
     end
 
     lastCaller = { src = nil, name = nil }
+    answeredByPolice = nil
     clearPolicePendingCall()
 end)
 
@@ -98,6 +111,7 @@ RegisterNetEvent('intercom:server:callTimeout', function()
 
     if lastCaller.src == src then
         lastCaller = { src = nil, name = nil }
+        answeredByPolice = nil
         clearPolicePendingCall()
     end
 end)
@@ -121,5 +135,6 @@ lib.addCommand('citofono', {
     TriggerClientEvent('intercom:client:playSound', lastCaller.src, 'answer')
 
     clearPolicePendingCall()
+    answeredByPolice = source
     TriggerClientEvent('intercom:client:openMonitor', source, lastCaller.name, true)
 end)
