@@ -1239,7 +1239,7 @@ RegisterNetEvent('intercom:client:incomingCall', function(callerName)
     pendingCall = callerName
     playIntercomSound('doorbell')
     sendNui('playSound', { sound = 'doorbell' })
-    exports['ss-libs']:Notify(('🔔 CITOFONO · sta suonando! Apri il monitor e rispondi.'):format(callerName), 'warning', 10000)
+    exports['ss-libs']:Notify(('🔔 CITOFONO · %s sta suonando! Apri il monitor e rispondi.'):format(callerName), 'warning', 10000)
 
     if isViewingCam and monitorViewMode == 'cctv' then
         focusMonitorOnRing(callerName)
