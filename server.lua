@@ -178,7 +178,7 @@ RegisterNetEvent('intercom:server:unlockDoor', function(doorId)
 
     if not isPoliceOnDuty(src) then return end
 
-    exports.ox_doorlock:setDoorState(doorId, 0)
+    exports.ox_doorlock:setDoorState(doorId, 1)
 
     TriggerClientEvent('intercom:client:playSound', src, 'unlock')
 
