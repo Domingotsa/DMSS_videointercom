@@ -40,7 +40,7 @@ Config.CctvProps = {
 
     {
 
-        label = 'CAM-01 · INGRESSO SX',
+        label = 'CAM-01 · INGRESSO CITOFONO',
 
         model = `prop_cctv_cam_04a`,
 
@@ -54,7 +54,7 @@ Config.CctvProps = {
 
         feedView = vec4(5611.0845, -3122.1223, 12.9319, 163.8805),
 
-        feedPitch = -5.0,
+        feedPitch = -12.0,
 
         feedFov = 60.0,
 
@@ -80,7 +80,7 @@ Config.CctvProps = {
 
         feedView = vec4(5615.6694, -3119.4661, 16.5735, 226.8939),
 
-        feedPitch = -8.0,
+        feedPitch = -30.0,
 
         feedFov = 60.0,
 
