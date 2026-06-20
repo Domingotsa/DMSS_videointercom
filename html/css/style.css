@@ -334,6 +334,23 @@ body {
     letter-spacing: 0.06em;
 }
 
+.dual-cam-badge {
+    padding: 2px 8px;
+    margin-left: 8px;
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    border-radius: 3px;
+    background: rgba(14, 116, 144, 0.25);
+    font-family: 'Consolas', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    color: #7dd3fc;
+    letter-spacing: 0.08em;
+}
+
+.dual-cam-badge.hidden {
+    display: none;
+}
+
 .live-badge {
     padding: 3px 8px;
     background: rgba(239, 68, 68, 0.2);

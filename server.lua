@@ -173,12 +173,31 @@ RegisterNetEvent('intercom:server:hangUpCall', function()
     resetCallState({ forceClosePolice = true })
 end)
 
-RegisterNetEvent('intercom:server:unlockDoor', function(doorId)
+RegisterNetEvent('intercom:server:unlockDoor', function(_doorId)
     local src = source
 
     if not isPoliceOnDuty(src) then return end
 
-    exports.ox_doorlock:setDoorState(doorId, 1)
+    local doorId = Config.DoorlockId
+    if not doorId then
+        exports.ox_lib:notify(src, { title = 'Citofono', description = 'DoorlockId non configurato.', type = 'error' })
+        return
+    end
+
+    local door = exports.ox_doorlock:getDoor(doorId)
+    if not door then
+        exports.ox_lib:notify(src, {
+            title = 'Citofono',
+            description = ('Porta ox_doorlock #%s non trovata. Verifica Config.DoorlockId.'):format(doorId),
+            type = 'error',
+        })
+        return
+    end
+
+    -- ox_doorlock: 0 = sbloccata, 1 = bloccata
+    exports.ox_doorlock:setDoorState(doorId, 0)
+
+    exports.ox_lib:notify(src, { title = 'Citofono', description = 'Porta sbloccata.', type = 'success' })
 
     TriggerClientEvent('intercom:client:playSound', src, 'unlock')
 

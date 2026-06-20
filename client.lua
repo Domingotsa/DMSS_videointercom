@@ -15,6 +15,7 @@ local policeVoiceHintActive = false
 local voiceCallActive = false
 local voiceInputActive = false
 local voiceProximityThreadActive = false
+local dualCamPreviewActive = false
 
 -- Controlli microfono da tenere attivi con NUI monitor aperto (PTT pma-voice)
 local VOICE_INPUT_CONTROLS = {
@@ -252,6 +253,7 @@ end
 local function closeMonitor(skipServer)
     if not isViewingCam then return end
 
+    stopDualCamPreview()
     sendNui('hidePolice')
     setMonitorNuiFocus(false)
 
@@ -285,7 +287,6 @@ local function unlockDoorFromMonitor()
     TriggerServerEvent('intercom:server:unlockDoor', Config.DoorlockId)
     playIntercomSound('unlock')
     sendNui('playSound', { sound = 'unlock' })
-    exports['ss-libs']:Notify('Serratura sbloccata!', 'success')
     closeMonitor()
 end
 
@@ -553,6 +554,10 @@ local function deleteCctvProps()
     cctvPropEntities = {}
 end
 
+local function isVirtualCctvEntry(entry)
+    return entry and (entry.virtual == true or entry.noProp == true)
+end
+
 local function getCctvPropPlacement(entry)
     local base = entry.coords
     local o = entry.propOffset or vec3(0.0, 0.0, 0.0)
@@ -561,6 +566,17 @@ local function getCctvPropPlacement(entry)
 end
 
 local function getCctvFeedPlacement(entry)
+    if isVirtualCctvEntry(entry) then
+        if entry.feedView or entry.feedCoords then
+            local feed = entry.feedView or entry.feedCoords
+            return feed.x, feed.y, feed.z, feed.w
+        end
+
+        local base = Config.IntercomProp
+        local o = entry.feedOffset or vec3(0.0, 0.10, 1.42)
+        return getWorldFromBase(base, o, entry.feedHeadingOffset or 0.0)
+    end
+
     if entry.feedView or entry.feedCoords then
         local feed = entry.feedView or entry.feedCoords
         return feed.x, feed.y, feed.z, feed.w
@@ -572,8 +588,7 @@ local function getCctvFeedPlacement(entry)
 end
 
 local function buildCctvFeed(entry, index)
-    local feed = entry.feedView or entry.feedCoords
-    if feed or entry.feedOffset then
+    if isVirtualCctvEntry(entry) or entry.feedView or entry.feedCoords or entry.feedOffset then
         local x, y, z, heading = getCctvFeedPlacement(entry)
         return {
             x = x,
@@ -700,6 +715,79 @@ local function buildMonitorCameraList(feeds)
     return cameras
 end
 
+local function findMonitorFeedIndex(matcher)
+    local feeds = getMonitorFeeds()
+    for i = 1, #feeds do
+        local entry = Config.CctvProps and Config.CctvProps[feeds[i].index]
+        if entry and matcher(entry, feeds[i]) then
+            return i
+        end
+    end
+    return 1
+end
+
+local function getIntegratedMonitorFeedIndex()
+    return findMonitorFeedIndex(function(entry)
+        return entry.intercomFeed == true
+    end)
+end
+
+local function getPrimaryWideMonitorFeedIndex()
+    return findMonitorFeedIndex(function(entry)
+        return entry.monitorFeed and not isVirtualCctvEntry(entry)
+    end)
+end
+
+local function stopDualCamPreview()
+    dualCamPreviewActive = false
+end
+
+local function startDualCamPreview()
+    if Config.DualCamPreviewOnRing == false then return end
+    if dualCamPreviewActive then return end
+    if not pendingCall or not isViewingCam or monitorViewMode ~= 'cctv' then return end
+
+    local integratedIdx = getIntegratedMonitorFeedIndex()
+    local wideIdx = getPrimaryWideMonitorFeedIndex()
+    if integratedIdx == wideIdx then return end
+
+    dualCamPreviewActive = true
+
+    CreateThread(function()
+        local showIntegrated = false
+        while dualCamPreviewActive do
+            if not pendingCall or not isViewingCam or monitorViewMode ~= 'cctv' then break end
+
+            showIntegrated = not showIntegrated
+            local idx = showIntegrated and integratedIdx or wideIdx
+            applyMonitorCamera(idx)
+            refreshMonitorUi({
+                hasPendingCall = true,
+                activeCamera = idx,
+                dualCamPreview = true,
+            })
+
+            Wait(Config.DualCamPreviewInterval or 3000)
+        end
+
+        dualCamPreviewActive = false
+    end)
+end
+
+local function focusMonitorOnRing(callerName)
+    if not isViewingCam or monitorViewMode ~= 'cctv' then return end
+
+    local integratedIdx = getIntegratedMonitorFeedIndex()
+    activeMonitorCamIndex = integratedIdx
+    applyMonitorCamera(integratedIdx)
+    refreshMonitorUi({
+        caller = callerName or pendingCall,
+        hasPendingCall = true,
+        activeCamera = integratedIdx,
+    })
+    startDualCamPreview()
+end
+
 local function applyMonitorCamera(index)
     if monitorViewMode ~= 'cctv' then return end
 
@@ -718,6 +806,7 @@ local function applyMonitorCamera(index)
         camera = feed.label,
         activeCamera = index,
         cameras = buildMonitorCameraList(feeds),
+        dualCamPreview = dualCamPreviewActive,
     })
 end
 
@@ -754,6 +843,7 @@ local function buildMonitorUiPayload(opts)
         activeCamera = feedIndex,
         cameras = buildMonitorCameraList(feeds),
         lockCameras = onIntercomCall,
+        dualCamPreview = opts.dualCamPreview == true or dualCamPreviewActive,
     }
 end
 
@@ -771,12 +861,12 @@ local function openPoliceMonitor()
     monitorViewMode = 'cctv'
     isViewingCam = true
     hasAnsweredCall = false
-    activeMonitorCamIndex = 1
+    activeMonitorCamIndex = pendingCall and getIntegratedMonitorFeedIndex() or 1
 
     DoScreenFadeOut(400)
     Wait(400)
 
-    local feed, feeds = getMonitorFeed(1)
+    local feed, feeds = getMonitorFeed(activeMonitorCamIndex)
     intercomCam = CreateCamWithParams(
         'DEFAULT_SCRIPTED_CAMERA',
         feed.x, feed.y, feed.z,
@@ -792,12 +882,18 @@ local function openPoliceMonitor()
     playIntercomSound('cctvOn')
     sendNui('showPolice', buildMonitorUiPayload({
         hasPendingCall = pendingCall ~= nil,
+        activeCamera = activeMonitorCamIndex,
     }))
     sendNui('playSound', { sound = 'cctvOn' })
     setMonitorNuiFocus(true)
+
+    if pendingCall then
+        startDualCamPreview()
+    end
 end
 
 local function activateIntercomCallView(callerName)
+    stopDualCamPreview()
     monitorViewMode = 'intercom'
     hasAnsweredCall = true
 
@@ -824,6 +920,7 @@ local function openIntercomCall(callerName)
         return
     end
 
+    stopDualCamPreview()
     monitorViewMode = 'intercom'
     isViewingCam = true
     hasAnsweredCall = true
@@ -864,7 +961,7 @@ local function openCctvMonitor()
 end
 
 local function spawnSingleCctvProp(index, entry)
-    if not entry or not entry.coords then return false end
+    if not entry or isVirtualCctvEntry(entry) or not entry.coords then return false end
 
     local x, y, z, heading, depth = getCctvPropPlacement(entry)
 
@@ -912,6 +1009,9 @@ local function spawnCctvProps()
 
     for i = 1, #Config.CctvProps do
         local entry = Config.CctvProps[i]
+        if isVirtualCctvEntry(entry) then
+            goto continue_cctv
+        end
         if not entry.coords then
             print(('[DMSS_videointercom] CCTV [%d] senza coords in config'):format(i))
         elseif not propEntityExists(cctvPropEntities[i]) then
@@ -920,6 +1020,7 @@ local function spawnCctvProps()
             local x, y, z = getCctvPropPlacement(entry)
             linkPropToInterior(cctvPropEntities[i], x, y, z)
         end
+        ::continue_cctv::
     end
 end
 
@@ -929,9 +1030,14 @@ local function arePropsSpawned()
     if not Config.CctvProps then return true end
 
     for i = 1, #Config.CctvProps do
-        if Config.CctvProps[i].coords and not propEntityExists(cctvPropEntities[i]) then
+        local entry = Config.CctvProps[i]
+        if isVirtualCctvEntry(entry) or not entry.coords then
+            goto continue_spawn_check
+        end
+        if not propEntityExists(cctvPropEntities[i]) then
             return false
         end
+        ::continue_spawn_check::
     end
 
     return true
@@ -1136,15 +1242,13 @@ RegisterNetEvent('intercom:client:incomingCall', function(callerName)
     exports['ss-libs']:Notify(('🔔 CITOFONO · sta suonando! Apri il monitor e rispondi.'):format(callerName), 'warning', 10000)
 
     if isViewingCam and monitorViewMode == 'cctv' then
-        refreshMonitorUi({
-            caller = callerName,
-            hasPendingCall = true,
-        })
+        focusMonitorOnRing(callerName)
     end
 end)
 
 RegisterNetEvent('intercom:client:clearPendingCall', function()
     pendingCall = nil
+    stopDualCamPreview()
 
     if isViewingCam and monitorViewMode == 'cctv' then
         refreshMonitorUi({
@@ -1216,6 +1320,7 @@ RegisterNUICallback('answerCall', function(_, cb)
 end)
 RegisterNUICallback('switchCamera', function(data, cb)
     if not isViewingCam then cb('ok') return end
+    stopDualCamPreview()
     applyMonitorCamera(tonumber(data.index) or 1)
     cb('ok')
 end)

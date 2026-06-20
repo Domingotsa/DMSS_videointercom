@@ -17,6 +17,7 @@ const btnAnswer = document.getElementById('btn-answer');
 const btnUnlock = document.getElementById('btn-unlock');
 const btnClose = document.getElementById('btn-close');
 const visitorHangupHint = document.getElementById('visitor-hangup-hint');
+const dualCamBadge = document.getElementById('dual-cam-badge');
 
 let visitorInterval = null;
 let policeClockInterval = null;
@@ -169,9 +170,15 @@ function renderCameraList(cameras, activeIndex) {
     });
 }
 
+function setDualCamPreview(enabled) {
+    if (!dualCamBadge) return;
+    dualCamBadge.classList.toggle('hidden', !enabled);
+}
+
 function updatePoliceCamera(data) {
     policeCamId.textContent = data.camera || policeCamId.textContent;
     if (data.lockCameras !== undefined) camerasLocked = data.lockCameras === true;
+    if (data.dualCamPreview !== undefined) setDualCamPreview(data.dualCamPreview === true);
     renderCameraList(data.cameras, data.activeCamera);
 }
 
@@ -196,10 +203,15 @@ function updateIntercomUi(data) {
             renderCameraList(data.cameras, data.activeCamera || 1);
         }
     }
+
+    if (data.dualCamPreview !== undefined) {
+        setDualCamPreview(data.dualCamPreview === true);
+    }
 }
 
 function showPolice(data) {
     camerasLocked = data.lockCameras === true;
+    setDualCamPreview(data.dualCamPreview === true);
 
     policeCaller.textContent = data.caller || 'Nessuna chiamata';
     policeCamId.textContent = data.camera || 'CAM-01 · INGRESSO SX';
@@ -227,6 +239,7 @@ function hidePolice() {
     policePanel.classList.add('hidden');
     btnAnswer.classList.add('hidden');
     setUnlockEnabled(false);
+    setDualCamPreview(false);
     camerasLocked = false;
     if (cameraList) cameraList.innerHTML = '';
     stopPoliceClock();

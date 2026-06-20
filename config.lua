@@ -35,8 +35,29 @@ Config.SpawnMaintainInterval = 2000
 
 
 -- ── Telecamere CCTV ─────────────────────────────────────────────────
+-- virtual = true: solo feed (nessun prop), tipicamente integrata nel citofono
+-- intercomFeed: cam usata quando si risponde al citofono (volto visitatore)
+-- monitorFeed: cam selezionabile nel monitor di sorveglianza
 
 Config.CctvProps = {
+
+    {
+
+        label = 'CIT · VISITATORE',
+
+        virtual = true,
+
+        feedOffset = vec3(0.0, 0.10, 1.42),
+
+        feedPitch = -10.0,
+
+        feedFov = 40.0,
+
+        intercomFeed = true,
+
+        monitorFeed = true,
+
+    },
 
     {
 
@@ -57,8 +78,6 @@ Config.CctvProps = {
         feedPitch = -12.0,
 
         feedFov = 60.0,
-
-        intercomFeed = true,
 
         monitorFeed = true,
 
@@ -92,7 +111,15 @@ Config.CctvProps = {
 
 
 
--- intercomFeed: telecamera usata quando si risponde al citofono (CAM-01)
+-- Alterna CIT + CAM-01 sul monitor mentre suona il citofono (entrambe visibili a rotazione)
+
+Config.DualCamPreviewOnRing = true
+
+Config.DualCamPreviewInterval = 3000
+
+
+
+-- intercomFeed: telecamera usata quando si risponde al citofono
 
 -- monitorFeed: telecamere visibili nel monitor di sorveglianza
 
