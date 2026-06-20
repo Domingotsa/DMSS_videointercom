@@ -374,6 +374,119 @@ body {
     inset: 0;
     right: 280px;
     pointer-events: none;
+    z-index: 5;
+}
+
+.split-view {
+    position: absolute;
+    inset: 48px 0 48px 0;
+    display: flex;
+    pointer-events: none;
+}
+
+.split-view.hidden {
+    display: none;
+}
+
+.split-pane {
+    flex: 1;
+    position: relative;
+    border: 2px solid rgba(56, 189, 248, 0.35);
+    background: rgba(0, 0, 0, 0.08);
+}
+
+.split-pane-left {
+    border-right: none;
+}
+
+.split-pane-right {
+    border-left: none;
+}
+
+.split-divider {
+    width: 3px;
+    background: linear-gradient(180deg, rgba(56, 189, 248, 0.1), rgba(56, 189, 248, 0.85), rgba(56, 189, 248, 0.1));
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.45);
+}
+
+.split-label {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    padding: 4px 10px;
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.72);
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: #7dd3fc;
+    letter-spacing: 0.08em;
+}
+
+.monitor-action-bar {
+    position: absolute;
+    left: 50%;
+    bottom: 56px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 12px;
+    background: rgba(8, 12, 20, 0.92);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+    pointer-events: auto;
+    z-index: 30;
+}
+
+.bar-btn {
+    padding: 12px 18px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+    white-space: nowrap;
+}
+
+.bar-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+}
+
+.bar-btn.hidden {
+    display: none;
+}
+
+.bar-btn.disabled,
+.bar-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.bar-btn-answer {
+    background: linear-gradient(135deg, #059669, #10b981);
+    color: #ecfdf5;
+    box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35);
+}
+
+.bar-btn-unlock {
+    background: linear-gradient(135deg, #0369a1, #0ea5e9);
+    color: #f0f9ff;
+    box-shadow: 0 4px 16px rgba(14, 165, 233, 0.35);
+}
+
+.bar-btn-close {
+    background: rgba(51, 65, 85, 0.95);
+    color: #e2e8f0;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.hint-sep {
+    margin: 0 6px;
+    color: #475569;
 }
 
 .cctv-sidebar {

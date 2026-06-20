@@ -65,15 +65,30 @@ local function startVoiceCall(callerSrc, policeSrc)
     }
 
     if isVoiceAvailable() then
+        if GetConvarInt('voice_enableCalls', 1) ~= 1 then
+            print('[DMSS_videointercom] ATTENZIONE: voice_enableCalls non attivo nel server.cfg (serve setr voice_enableCalls 1)')
+        end
+
         local resource = getVoiceResource()
-        pcall(function()
+        local okCaller, errCaller = pcall(function()
             exports[resource]:setPlayerCall(callerSrc, channel)
+        end)
+        local okPolice, errPolice = pcall(function()
             exports[resource]:setPlayerCall(policeSrc, channel)
         end)
+
+        if not okCaller or not okPolice then
+            print(('[DMSS_videointercom] Errore setPlayerCall canale %s: caller=%s police=%s'):format(
+                channel, tostring(errCaller), tostring(errPolice)
+            ))
+        end
     end
 
-    TriggerClientEvent('intercom:client:voiceCallStarted', callerSrc, channel)
-    TriggerClientEvent('intercom:client:voiceCallStarted', policeSrc, channel)
+    SetTimeout(150, function()
+        if not activeVoiceCall or activeVoiceCall.channel ~= channel then return end
+        TriggerClientEvent('intercom:client:voiceCallStarted', callerSrc, channel)
+        TriggerClientEvent('intercom:client:voiceCallStarted', policeSrc, channel)
+    end)
 end
 
 local function getOnDutyPolice()
@@ -125,14 +140,22 @@ end
 local function connectIntercomCall(policeSrc)
     if not lastCaller.src then return false end
 
-    TriggerClientEvent('intercom:client:callAnswered', lastCaller.src)
+    local callerSrc = lastCaller.src
+    local callerName = lastCaller.name
+
+    TriggerClientEvent('intercom:client:callAnswered', callerSrc)
     TriggerClientEvent('intercom:client:playSound', policeSrc, 'answer')
-    TriggerClientEvent('intercom:client:playSound', lastCaller.src, 'answer')
+    TriggerClientEvent('intercom:client:playSound', callerSrc, 'answer')
 
     clearPolicePendingCall()
     answeredByPolice = policeSrc
-    startVoiceCall(lastCaller.src, policeSrc)
-    TriggerClientEvent('intercom:client:openMonitor', policeSrc, lastCaller.name)
+    startVoiceCall(callerSrc, policeSrc)
+
+    -- Apri il monitor dopo l'avvio del canale vocale (evita race con pma-voice / PTT)
+    SetTimeout(250, function()
+        if answeredByPolice ~= policeSrc then return end
+        TriggerClientEvent('intercom:client:openMonitor', policeSrc, callerName)
+    end)
 
     return true
 end
@@ -157,7 +180,7 @@ RegisterNetEvent('intercom:server:answerCall', function()
 
     if not isPoliceOnDuty(src) then return end
     if not lastCaller.src then
-        exports.ox_lib:notify(src, { title = 'Citofono', description = 'Nessuna chiamata in corso.', type = 'error' })
+        lib.notify(src, { title = 'Citofono', description = 'Nessuna chiamata in corso.', type = 'error' })
         return
     end
 
@@ -180,13 +203,13 @@ RegisterNetEvent('intercom:server:unlockDoor', function(_doorId)
 
     local doorId = Config.DoorlockId
     if not doorId then
-        exports.ox_lib:notify(src, { title = 'Citofono', description = 'DoorlockId non configurato.', type = 'error' })
+        lib.notify(src, { title = 'Citofono', description = 'DoorlockId non configurato.', type = 'error' })
         return
     end
 
     local door = exports.ox_doorlock:getDoor(doorId)
     if not door then
-        exports.ox_lib:notify(src, {
+        lib.notify(src, {
             title = 'Citofono',
             description = ('Porta ox_doorlock #%s non trovata. Verifica Config.DoorlockId.'):format(doorId),
             type = 'error',
@@ -197,12 +220,13 @@ RegisterNetEvent('intercom:server:unlockDoor', function(_doorId)
     -- ox_doorlock: 0 = sbloccata, 1 = bloccata
     exports.ox_doorlock:setDoorState(doorId, 0)
 
-    exports.ox_lib:notify(src, { title = 'Citofono', description = 'Porta sbloccata.', type = 'success' })
+    lib.notify(src, { title = 'Citofono', description = 'Porta sbloccata.', type = 'success' })
 
     TriggerClientEvent('intercom:client:playSound', src, 'unlock')
 
     if lastCaller.src then
         TriggerClientEvent('intercom:client:playSound', lastCaller.src, 'unlock')
+        TriggerClientEvent('intercom:client:doorUnlocked', lastCaller.src)
     end
 
     resetCallState({ notifyVisitorEnded = true })
@@ -249,12 +273,12 @@ lib.addCommand('citofono', {
     restricted = 'group.police',
 }, function(source)
     if not isPoliceOnDuty(source) then
-        exports.ox_lib:notify(source, { title = 'Errore', description = 'Questo comando è riservato alla polizia in servizio.', type = 'error' })
+        lib.notify(source, { title = 'Errore', description = 'Questo comando è riservato alla polizia in servizio.', type = 'error' })
         return
     end
 
     if not lastCaller.src then
-        exports.ox_lib:notify(source, { title = 'Citofono', description = 'Nessuna chiamata in corso.', type = 'error' })
+        lib.notify(source, { title = 'Citofono', description = 'Nessuna chiamata in corso.', type = 'error' })
         return
     end
 

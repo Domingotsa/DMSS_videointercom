@@ -18,6 +18,12 @@ const btnUnlock = document.getElementById('btn-unlock');
 const btnClose = document.getElementById('btn-close');
 const visitorHangupHint = document.getElementById('visitor-hangup-hint');
 const dualCamBadge = document.getElementById('dual-cam-badge');
+const splitView = document.getElementById('split-view');
+const splitLeftLabel = document.getElementById('split-left-label');
+const splitRightLabel = document.getElementById('split-right-label');
+const barBtnAnswer = document.getElementById('bar-btn-answer');
+const barBtnUnlock = document.getElementById('bar-btn-unlock');
+const barBtnClose = document.getElementById('bar-btn-close');
 
 let visitorInterval = null;
 let policeClockInterval = null;
@@ -122,6 +128,30 @@ function stopPoliceClock() {
 function setUnlockEnabled(enabled) {
     btnUnlock.disabled = !enabled;
     btnUnlock.classList.toggle('disabled', !enabled);
+    if (barBtnUnlock) {
+        barBtnUnlock.disabled = !enabled;
+        barBtnUnlock.classList.toggle('disabled', !enabled);
+    }
+}
+
+function setAnswerVisible(visible) {
+    btnAnswer.classList.toggle('hidden', !visible);
+    if (barBtnAnswer) barBtnAnswer.classList.toggle('hidden', !visible);
+}
+
+function setSplitView(data) {
+    const enabled = data.splitView === true;
+    if (splitView) splitView.classList.toggle('hidden', !enabled);
+    if (enabled) {
+        if (splitLeftLabel && data.splitLeftLabel) splitLeftLabel.textContent = data.splitLeftLabel;
+        if (splitRightLabel && data.splitRightLabel) splitRightLabel.textContent = data.splitRightLabel;
+        if (dualCamBadge) {
+            dualCamBadge.textContent = 'SPLIT · CAM + CIT';
+            dualCamBadge.classList.remove('hidden');
+        }
+    } else if (dualCamBadge && data.dualCamPreview !== true) {
+        dualCamBadge.classList.add('hidden');
+    }
 }
 
 function showVisitor(data) {
@@ -171,8 +201,9 @@ function renderCameraList(cameras, activeIndex) {
 }
 
 function setDualCamPreview(enabled) {
-    if (!dualCamBadge) return;
+    if (!dualCamBadge || (splitView && !splitView.classList.contains('hidden'))) return;
     dualCamBadge.classList.toggle('hidden', !enabled);
+    if (enabled) dualCamBadge.textContent = 'AUTO · CIT + CAM-01';
 }
 
 function updatePoliceCamera(data) {
@@ -190,7 +221,7 @@ function updateIntercomUi(data) {
     }
 
     if (data.hasPendingCall !== undefined) {
-        btnAnswer.classList.toggle('hidden', !data.hasPendingCall);
+        setAnswerVisible(data.hasPendingCall === true);
     }
 
     if (data.canUnlock !== undefined) {
@@ -207,14 +238,21 @@ function updateIntercomUi(data) {
     if (data.dualCamPreview !== undefined) {
         setDualCamPreview(data.dualCamPreview === true);
     }
+
+    if (data.splitView !== undefined) {
+        setSplitView(data);
+    }
 }
 
 function showPolice(data) {
     camerasLocked = data.lockCameras === true;
     setDualCamPreview(data.dualCamPreview === true);
+    setSplitView(data);
 
     policeCaller.textContent = data.caller || 'Nessuna chiamata';
-    policeCamId.textContent = data.camera || 'CAM-01 · INGRESSO SX';
+    policeCamId.textContent = data.splitView
+        ? 'SPLIT · CAM + CIT'
+        : (data.camera || 'CAM-01 · INGRESSO SX');
 
     if (policeCallerHint) {
         if (data.canUnlock) {
@@ -229,7 +267,7 @@ function showPolice(data) {
     renderCameraList(data.cameras, data.activeCamera || 1);
     policePanel.classList.remove('hidden');
 
-    btnAnswer.classList.toggle('hidden', !data.hasPendingCall);
+    setAnswerVisible(data.hasPendingCall === true);
     setUnlockEnabled(data.canUnlock === true);
 
     startPoliceClock();
@@ -237,9 +275,11 @@ function showPolice(data) {
 
 function hidePolice() {
     policePanel.classList.add('hidden');
-    btnAnswer.classList.add('hidden');
+    setAnswerVisible(false);
     setUnlockEnabled(false);
     setDualCamPreview(false);
+    if (splitView) splitView.classList.add('hidden');
+    if (dualCamBadge) dualCamBadge.classList.add('hidden');
     camerasLocked = false;
     if (cameraList) cameraList.innerHTML = '';
     stopPoliceClock();
@@ -274,7 +314,7 @@ window.addEventListener('message', (event) => {
             if (sound) playUiTone(sound);
             break;
         case 'enableUnlock':
-            btnAnswer.classList.add('hidden');
+            setAnswerVisible(false);
             setUnlockEnabled(true);
             break;
     }
@@ -282,10 +322,17 @@ window.addEventListener('message', (event) => {
 
 btnHangup.addEventListener('click', () => postNui('hangUpCall'));
 btnAnswer.addEventListener('click', () => postNui('answerCall'));
+if (barBtnAnswer) barBtnAnswer.addEventListener('click', () => postNui('answerCall'));
 btnUnlock.addEventListener('click', () => {
     if (!btnUnlock.disabled) postNui('unlockDoor');
 });
+if (barBtnUnlock) {
+    barBtnUnlock.addEventListener('click', () => {
+        if (!barBtnUnlock.disabled) postNui('unlockDoor');
+    });
+}
 btnClose.addEventListener('click', () => postNui('closeMonitor'));
+if (barBtnClose) barBtnClose.addEventListener('click', () => postNui('closeMonitor'));
 
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !visitorPanel.classList.contains('hidden')) {

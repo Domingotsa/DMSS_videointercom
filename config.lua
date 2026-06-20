@@ -8,13 +8,33 @@ Config.IntercomProp = vec4(5611.8848, -3122.9387, 8.6942, 268.0362)
 
 Config.PropDepth = -0.02
 
-Config.PropOffset = vec3(0.0, 0.30, 0.5)
+Config.PropOffset = vec3(0.0, 0.33, 0.5)
 
 Config.PropRotation = vec3(0.0, 0.0, 0.0)
 
 
 
 Config.IntercomModel = `prop_ld_keypad_01`
+
+-- Faro citofono (prop_wall_light_03a): acceso di notte in base all'orario di gioco
+
+Config.IntercomLightEnabled = true
+
+Config.IntercomLightModel = `prop_wall_light_03a`
+
+Config.IntercomLightOffset = vec3(0.0, 0.33, 0.82)
+
+Config.IntercomLightRotation = vec3(0.0, 0.0, 180.0)
+
+Config.IntercomLightOnHour = 19
+
+Config.IntercomLightOffHour = 7
+
+Config.IntercomLightUpdateMs = 30000
+
+Config.IntercomLightGlowRange = 1.8
+
+Config.IntercomLightGlowIntensity = 1.0
 
 Config.UseVisualProp = true
 
@@ -47,7 +67,9 @@ Config.CctvProps = {
 
         virtual = true,
 
-        feedOffset = vec3(0.0, 0.10, 1.42),
+        feedOffset = vec3(0.0, 0.0, 1.0),
+
+        feedHeadingOffset = 180.0,
 
         feedPitch = -10.0,
 
@@ -151,6 +173,14 @@ Config.LocationLabel = 'Centralino'
 
 Config.VisitorTimeout = 60000
 
+Config.VisitorDoorOpenMessage = 'Porta d\'ingresso aperta.'
+
+-- Monitor polizia: CAM-01 e videocitofono affiancati durante chiamata
+
+Config.MonitorSplitView = true
+
+Config.MonitorSidebarPx = 280
+
 -- Comunicazione vocale durante la chiamata citofono (pma-voice)
 
 Config.VoiceEnabled = true
@@ -159,10 +189,10 @@ Config.VoiceResource = 'pma-voice'
 
 Config.VoiceCallVolume = 100
 
--- Metri proximity durante chiamata: la voce va SOLO sul canale call (visitatore <-> polizia).
--- 0.01 = praticamente zero leak in proximity. Richiede server.cfg: setr voice_enableCalls 1
+-- Metri proximity durante chiamata (false = disabilitato, usa solo canale call).
+-- Richiede server.cfg: setr voice_enableCalls 1
 
-Config.VoiceProximityOverride = 0.01
+Config.VoiceProximityOverride = false
 
 Config.Debug = false
 

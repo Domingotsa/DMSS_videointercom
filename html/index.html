@@ -64,7 +64,29 @@
                 </div>
             </div>
 
-            <div class="cctv-viewport"></div>
+            <div class="cctv-viewport">
+                <div class="split-view hidden" id="split-view">
+                    <div class="split-pane split-pane-left">
+                        <span class="split-label" id="split-left-label">CAM-01</span>
+                    </div>
+                    <div class="split-divider"></div>
+                    <div class="split-pane split-pane-right">
+                        <span class="split-label" id="split-right-label">CIT · VISITATORE</span>
+                    </div>
+                </div>
+
+                <div class="monitor-action-bar" id="monitor-action-bar">
+                    <button type="button" class="bar-btn bar-btn-answer hidden" id="bar-btn-answer">
+                        Rispondi al citofono
+                    </button>
+                    <button type="button" class="bar-btn bar-btn-unlock disabled" id="bar-btn-unlock" disabled>
+                        Sblocca porta
+                    </button>
+                    <button type="button" class="bar-btn bar-btn-close" id="bar-btn-close">
+                        Chiudi monitor
+                    </button>
+                </div>
+            </div>
 
             <div class="cctv-sidebar">
                 <div class="sidebar-header">
@@ -111,7 +133,11 @@
                 </div>
 
                 <div class="sidebar-footer">
-                    <kbd>ESC</kbd> per uscire
+                    <kbd>N</kbd> Parla
+                    <span class="hint-sep">·</span>
+                    <kbd>E</kbd> Sblocca
+                    <span class="hint-sep">·</span>
+                    <kbd>ESC</kbd> Chiudi
                 </div>
             </div>
 

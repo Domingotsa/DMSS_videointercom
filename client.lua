@@ -1,5 +1,9 @@
 local intercomCam = nil
+local intercomCamLeft = nil
+local intercomCamRight = nil
+local monitorSplitActive = false
 local intercomProp = nil
+local intercomLightProp = nil
 local cctvPropEntities = {}
 local isViewingCam = false
 local activeMonitorCamIndex = 1
@@ -82,7 +86,7 @@ end
 local function showPoliceVoiceHint()
     if policeVoiceHintActive then return end
     policeVoiceHintActive = true
-    lib.showTextUI('Citofono attivo · parla al microfono  ·  [ESC] Chiudi', {
+    lib.showTextUI('Citofono attivo · [N] parla  ·  [E] Sblocca  ·  [ESC] Chiudi', {
         position = 'bottom-center',
         icon = 'microphone',
     })
@@ -102,14 +106,57 @@ local function isVoiceResourceReady()
     return Config.VoiceEnabled ~= false and GetResourceState(getVoiceResource()) == 'started'
 end
 
--- Il canale call lo imposta il server (setPlayerCall). Il client limita solo la proximity
--- così la voce non esce anche in chat vocale normale verso player vicini/lontani.
+-- Il canale call lo imposta il server (setPlayerCall); il client entra nel canale
+-- e limita la proximity così la voce resta solo visitatore <-> polizia.
+local function joinClientCallChannel(channel)
+    if not isVoiceResourceReady() or not channel or channel <= 0 then return false end
+
+    local ok = pcall(function()
+        exports[getVoiceResource()]:setCallChannel(channel)
+    end)
+
+    return ok and (LocalPlayer.state.callChannel or 0) == channel
+end
+
+local function ensureClientCallChannel(channel)
+    if not channel or channel <= 0 then return end
+
+    CreateThread(function()
+        for _ = 1, 20 do
+            if not voiceCallActive then return end
+            if not isVoiceResourceReady() then
+                Wait(250)
+                goto continue
+            end
+
+            joinClientCallChannel(channel)
+
+            if (LocalPlayer.state.callChannel or 0) == channel then
+                if Config.Debug then
+                    print(('[DMSS_videointercom] Canale call sincronizzato: %s'):format(channel))
+                end
+                return
+            end
+
+            Wait(250)
+            ::continue::
+        end
+
+        print(('[DMSS_videointercom] ATTENZIONE: canale call non sincronizzato (atteso %s, attuale %s). Verifica setr voice_enableCalls 1'):format(
+            channel, tostring(LocalPlayer.state.callChannel)
+        ))
+    end)
+end
+
 local function applyPrivateProximityOverride()
     if not isVoiceResourceReady() then return end
 
+    local range = Config.VoiceProximityOverride
+    if range == false or range == nil then return end
+
     local resource = getVoiceResource()
     pcall(function()
-        exports[resource]:overrideProximityRange(Config.VoiceProximityOverride or 0.01, true)
+        exports[resource]:overrideProximityRange(range, true)
     end)
 end
 
@@ -125,7 +172,7 @@ local function leaveClientCallChannel()
     if not isVoiceResourceReady() then return end
 
     pcall(function()
-        exports[getVoiceResource()]:removePlayerFromCall()
+        exports[getVoiceResource()]:setCallChannel(0)
     end)
 end
 
@@ -146,18 +193,26 @@ local function stopPrivateProximityGuard()
     voiceProximityThreadActive = false
 end
 
-local function enterPrivateCallMode(_channel)
-    if not isVoiceResourceReady() then return end
+local function enterPrivateCallMode(channel)
+    if not isVoiceResourceReady() then
+        exports['ss-libs']:Notify('pma-voice non disponibile: comunicazione vocale disabilitata.', 'error', 8000)
+        return
+    end
 
     local resource = getVoiceResource()
+    joinClientCallChannel(channel)
+    ensureClientCallChannel(channel)
+
     pcall(function()
-        if exports[resource].setCallVolume then
-            exports[resource]:setCallVolume(Config.VoiceCallVolume or 100)
-        end
+        exports[resource]:setCallVolume(Config.VoiceCallVolume or 100)
     end)
 
     applyPrivateProximityOverride()
     startPrivateProximityGuard()
+
+    if Config.Debug then
+        print(('[DMSS_videointercom] Canale vocale citofono avviato: %s'):format(tostring(channel)))
+    end
 end
 
 local function exitPrivateCallMode()
@@ -166,7 +221,15 @@ local function exitPrivateCallMode()
     leaveClientCallChannel()
 end
 
+local function monitorNeedsNuiFocus()
+    return isViewingCam
+end
+
 local function setMonitorNuiFocus(enabled)
+    if enabled and not isViewingCam then
+        enabled = false
+    end
+
     if enabled then
         SetNuiFocus(true, true)
         SetNuiFocusKeepInput(true)
@@ -176,17 +239,41 @@ local function setMonitorNuiFocus(enabled)
     end
 end
 
+local function syncMonitorNuiFocus()
+    if not isViewingCam then
+        setMonitorNuiFocus(false)
+        return
+    end
+
+    setMonitorNuiFocus(true)
+end
+
+local function enableVoiceControlsWhileMonitorOpen()
+    for i = 1, #VOICE_INPUT_CONTROLS do
+        local control = VOICE_INPUT_CONTROLS[i]
+        EnableControlAction(0, control, true)
+        EnableControlAction(1, control, true)
+        EnableControlAction(2, control, true)
+    end
+end
+
+local function pushToTalkWhileBlocked()
+    if IsControlPressed(0, 249) or IsDisabledControlPressed(0, 249) then
+        SetControlNormal(0, 249, 1.0)
+        SetControlNormal(1, 249, 1.0)
+        SetControlNormal(2, 249, 1.0)
+    end
+end
+
 local function startVoiceInputLoop()
     if voiceInputActive then return end
     voiceInputActive = true
 
     CreateThread(function()
-        while voiceInputActive and voiceCallActive do
-            for i = 1, #VOICE_INPUT_CONTROLS do
-                local control = VOICE_INPUT_CONTROLS[i]
-                EnableControlAction(0, control, true)
-                EnableControlAction(1, control, true)
-                EnableControlAction(2, control, true)
+        while voiceInputActive do
+            if isViewingCam and voiceCallActive then
+                pushToTalkWhileBlocked()
+                enableVoiceControlsWhileMonitorOpen()
             end
             Wait(0)
         end
@@ -250,10 +337,151 @@ local function hangUpCall()
     exports['ss-libs']:Notify('Hai riagganciato.', 'inform')
 end
 
+local function stopDualCamPreview()
+    dualCamPreviewActive = false
+end
+
+local SPLIT_RT_RIGHT = 'dmss_intercom_r'
+local SPLIT_RT_MODEL_RIGHT = `prop_tv_flat_03`
+local splitRtReady = false
+local splitRenderThreadActive = false
+
+local function shouldUseMonitorSplit()
+    if Config.MonitorSplitView == false then return false end
+    if not isViewingCam then return false end
+    if monitorViewMode == 'intercom' then return true end
+    if pendingCall and monitorViewMode == 'cctv' then return true end
+    return false
+end
+
+local function createCamFromFeed(feed)
+    return CreateCamWithParams(
+        'DEFAULT_SCRIPTED_CAMERA',
+        feed.x, feed.y, feed.z,
+        feed.pitch, 0.0, feed.heading,
+        feed.fov, false, 0
+    )
+end
+
+local function getMonitorSplitLayout()
+    local sw, _ = GetActiveScreenResolution()
+    local sidebarPx = Config.MonitorSidebarPx or 280.0
+    local feedRatio = (sw - sidebarPx) / sw
+    local paneW = feedRatio * 0.5
+    return {
+        feedRatio = feedRatio,
+        paneW = paneW,
+        leftX = feedRatio * 0.25,
+        rightX = feedRatio * 0.75,
+        paneH = 0.88,
+        paneAlignW = math.floor((paneW * 100) + 0.5),
+    }
+end
+
+local function setupSplitRenderTargets()
+    if splitRtReady then return end
+
+    if not IsNamedRendertargetRegistered(SPLIT_RT_RIGHT) then
+        RegisterNamedRendertarget(SPLIT_RT_RIGHT, false)
+    end
+    LinkNamedRendertarget(SPLIT_RT_MODEL_RIGHT)
+
+    splitRtReady = true
+end
+
+local function captureRightFeedRenderTarget(rightCam)
+    if not rightCam or not DoesCamExist(rightCam) then return false end
+
+    local rtId = GetNamedRendertargetRenderId(SPLIT_RT_RIGHT)
+    if not rtId or rtId == 0 or rtId == -1 then return false end
+
+    SetTextRenderId(rtId)
+    SetCamActive(rightCam, true)
+    RenderScriptCams(true, false, 0, true, false)
+    SetTextRenderId(GetDefaultScriptRendertargetRenderId())
+    SetCamActive(rightCam, false)
+    return true
+end
+
+local function drawSplitBackdrop(layout)
+    DrawRect(layout.feedRatio * 0.5, 0.5, layout.feedRatio, layout.paneH, 0, 0, 0, 255)
+end
+
+local function drawSplitRightPane(layout)
+    DrawSprite(SPLIT_RT_RIGHT, SPLIT_RT_RIGHT, layout.rightX, 0.5, layout.paneW, layout.paneH, 0.0, 255, 255, 255, 255)
+end
+
+local function renderSplitLeftPane(leftCam, rightCam, layout)
+    if not leftCam or not DoesCamExist(leftCam) then return end
+
+    if rightCam and DoesCamExist(rightCam) then
+        SetCamActive(rightCam, false)
+    end
+    SetCamActive(leftCam, true)
+    SetScriptGfxAlign(0, 84, layout.paneAlignW, 84)
+    RenderScriptCams(true, false, 0, true, false)
+    ResetScriptGfxAlign()
+end
+
+local function stopMonitorSplitView()
+    monitorSplitActive = false
+    splitRenderThreadActive = false
+    Wait(0)
+
+    if intercomCamLeft and DoesCamExist(intercomCamLeft) then
+        DestroyCam(intercomCamLeft, false)
+    end
+    if intercomCamRight and DoesCamExist(intercomCamRight) then
+        DestroyCam(intercomCamRight, false)
+    end
+
+    intercomCamLeft = nil
+    intercomCamRight = nil
+    SetTextRenderId(GetDefaultScriptRendertargetRenderId())
+    ResetScriptGfxAlign()
+    RenderScriptCams(false, false, 0, true, true)
+end
+
+local function startMonitorSplitView(leftFeed, rightFeed)
+    if not leftFeed or not rightFeed then return end
+
+    stopMonitorSplitView()
+    setupSplitRenderTargets()
+
+    if intercomCam and DoesCamExist(intercomCam) then
+        SetCamActive(intercomCam, false)
+    end
+    RenderScriptCams(false, false, 0, true, true)
+
+    intercomCamLeft = createCamFromFeed(leftFeed)
+    intercomCamRight = createCamFromFeed(rightFeed)
+    monitorSplitActive = true
+    splitRenderThreadActive = true
+
+    CreateThread(function()
+        while monitorSplitActive and splitRenderThreadActive and isViewingCam do
+            local layout = getMonitorSplitLayout()
+
+            captureRightFeedRenderTarget(intercomCamRight)
+            RenderScriptCams(false, false, 0, true, false)
+            drawSplitBackdrop(layout)
+            renderSplitLeftPane(intercomCamLeft, intercomCamRight, layout)
+            drawSplitRightPane(layout)
+
+            Wait(0)
+        end
+
+        SetTextRenderId(GetDefaultScriptRendertargetRenderId())
+        ResetScriptGfxAlign()
+        RenderScriptCams(false, false, 0, true, true)
+    end)
+end
+
 local function closeMonitor(skipServer)
     if not isViewingCam then return end
 
     stopDualCamPreview()
+    stopMonitorSplitView()
     sendNui('hidePolice')
     setMonitorNuiFocus(false)
 
@@ -261,7 +489,9 @@ local function closeMonitor(skipServer)
     Wait(300)
 
     ClearTimecycleModifier()
-    DestroyCam(intercomCam, false)
+    if intercomCam and DoesCamExist(intercomCam) then
+        DestroyCam(intercomCam, false)
+    end
     RenderScriptCams(false, false, 0, true, true)
     intercomCam = nil
     isViewingCam = false
@@ -370,7 +600,15 @@ local function applyPropRotation(entity, heading)
     applyEntityRotation(entity, heading, Config.PropRotation)
 end
 
+local function deleteIntercomLight()
+    if intercomLightProp and DoesEntityExist(intercomLightProp) then
+        DeleteEntity(intercomLightProp)
+    end
+    intercomLightProp = nil
+end
+
 local function deleteProp()
+    deleteIntercomLight()
     if intercomProp and DoesEntityExist(intercomProp) then
         DeleteEntity(intercomProp)
     end
@@ -484,12 +722,109 @@ local function linkPropToInterior(entity, x, y, z)
     SetEntityVisible(entity, true, false)
 end
 
+local function linkLightToInterior(entity, x, y, z)
+    if not entity or not DoesEntityExist(entity) then return end
+
+    local interior = GetInteriorAtCoords(x, y, z)
+    if interior == 0 then return end
+
+    PinInteriorInMemory(interior)
+
+    local room = GetRoomKeyFromEntity(cache.ped)
+    if room ~= 0 then
+        ForceRoomForEntity(entity, interior, room)
+    end
+end
+
 local function propEntityExists(entity)
     return entity and DoesEntityExist(entity)
 end
 
 local function setupPropZone()
     refreshIntercomTarget()
+end
+
+local function isIntercomLightTime()
+    if Config.IntercomLightEnabled == false then return false end
+
+    local hour = GetClockHours()
+    local onHour = Config.IntercomLightOnHour or 19
+    local offHour = Config.IntercomLightOffHour or 7
+
+    if onHour == offHour then return true end
+    if onHour > offHour then
+        return hour >= onHour or hour < offHour
+    end
+    return hour >= onHour and hour < offHour
+end
+
+local function updateIntercomLightState()
+    if not propEntityExists(intercomLightProp) then return end
+
+    local on = isIntercomLightTime()
+    SetEntityVisible(intercomLightProp, on, false)
+
+    if on then
+        ResetEntityAlpha(intercomLightProp)
+    else
+        SetEntityAlpha(intercomLightProp, 0, false)
+    end
+end
+
+local function drawIntercomLightGlow()
+    if not propEntityExists(intercomLightProp) or not isIntercomLightTime() then return end
+
+    local pos = GetEntityCoords(intercomLightProp)
+    local c = Config.IntercomLightColor or { r = 255, g = 220, b = 160 }
+    local range = Config.IntercomLightGlowRange or 1.8
+    local intensity = Config.IntercomLightGlowIntensity or 1.0
+
+    DrawLightWithRange(pos.x, pos.y, pos.z, c.r, c.g, c.b, range, intensity)
+end
+
+local function spawnIntercomLight()
+    if Config.IntercomLightEnabled == false or not Config.UseVisualProp then return false end
+    if not isNearIntercom() then return false end
+
+    local model = Config.IntercomLightModel or `prop_wall_light_03a`
+    local offset = Config.IntercomLightOffset or vec3(0.0, 0.05, 0.82)
+    local x, y, z, heading = getWorldFromIntercomBase(offset, 0.0)
+
+    if propEntityExists(intercomLightProp) then
+        SetEntityCoordsNoOffset(intercomLightProp, x, y, z, false, false, false)
+        linkLightToInterior(intercomLightProp, x, y, z)
+        updateIntercomLightState()
+        return true
+    end
+
+    if not lib.requestModel(model, 10000) then
+        print(('[DMSS_videointercom] Modello faro citofono non caricato: %s'):format(model))
+        return false
+    end
+
+    intercomLightProp = CreateObject(model, x, y, z, false, false, false)
+    if not propEntityExists(intercomLightProp) then
+        SetModelAsNoLongerNeeded(model)
+        return false
+    end
+
+    SetEntityAsMissionEntity(intercomLightProp, true, true)
+    SetEntityCoordsNoOffset(intercomLightProp, x, y, z, false, false, false)
+    applyEntityRotation(intercomLightProp, heading, Config.IntercomLightRotation or vec3(0.0, 0.0, 180.0))
+    ResetEntityAlpha(intercomLightProp)
+    SetEntityCollision(intercomLightProp, false, false)
+    FreezeEntityPosition(intercomLightProp, true)
+    SetEntityInvincible(intercomLightProp, true)
+    SetEntityLodDist(intercomLightProp, 500)
+    linkLightToInterior(intercomLightProp, x, y, z)
+    updateIntercomLightState()
+    SetModelAsNoLongerNeeded(model)
+
+    if Config.Debug then
+        print(('[DMSS_videointercom] Faro citofono spawnato a %.2f, %.2f, %.2f'):format(x, y, z))
+    end
+
+    return true
 end
 
 local function spawnProp()
@@ -535,6 +870,8 @@ local function spawnProp()
     SetModelAsNoLongerNeeded(Config.IntercomModel)
 
     setupPropZone()
+
+    spawnIntercomLight()
 
     if Config.Debug then
         print(('[DMSS_videointercom] Prop spawnato a %.2f, %.2f, %.2f (depth %.2f)'):format(
@@ -738,58 +1075,45 @@ local function getPrimaryWideMonitorFeedIndex()
     end)
 end
 
-local function stopDualCamPreview()
-    dualCamPreviewActive = false
-end
-
-local function startDualCamPreview()
-    if Config.DualCamPreviewOnRing == false then return end
-    if dualCamPreviewActive then return end
-    if not pendingCall or not isViewingCam or monitorViewMode ~= 'cctv' then return end
-
-    local integratedIdx = getIntegratedMonitorFeedIndex()
-    local wideIdx = getPrimaryWideMonitorFeedIndex()
-    if integratedIdx == wideIdx then return end
-
-    dualCamPreviewActive = true
-
-    CreateThread(function()
-        local showIntegrated = false
-        while dualCamPreviewActive do
-            if not pendingCall or not isViewingCam or monitorViewMode ~= 'cctv' then break end
-
-            showIntegrated = not showIntegrated
-            local idx = showIntegrated and integratedIdx or wideIdx
-            applyMonitorCamera(idx)
-            refreshMonitorUi({
-                hasPendingCall = true,
-                activeCamera = idx,
-                dualCamPreview = true,
-            })
-
-            Wait(Config.DualCamPreviewInterval or 3000)
+local function refreshMonitorSplitView()
+    if not shouldUseMonitorSplit() then
+        if monitorSplitActive then
+            stopMonitorSplitView()
+            if intercomCam and DoesCamExist(intercomCam) then
+                SetCamActive(intercomCam, true)
+                RenderScriptCams(true, false, 0, true, true)
+            end
         end
+        return false
+    end
 
-        dualCamPreviewActive = false
-    end)
-end
+    local feeds = getMonitorFeeds()
+    local wideIdx = getPrimaryWideMonitorFeedIndex()
+    local citIdx = getIntegratedMonitorFeedIndex()
+    local wideFeed = feeds[wideIdx]
+    local citFeed = feeds[citIdx]
 
-local function focusMonitorOnRing(callerName)
-    if not isViewingCam or monitorViewMode ~= 'cctv' then return end
+    if not wideFeed or not citFeed then return false end
 
-    local integratedIdx = getIntegratedMonitorFeedIndex()
-    activeMonitorCamIndex = integratedIdx
-    applyMonitorCamera(integratedIdx)
-    refreshMonitorUi({
-        caller = callerName or pendingCall,
-        hasPendingCall = true,
-        activeCamera = integratedIdx,
-    })
-    startDualCamPreview()
+    startMonitorSplitView(wideFeed, citFeed)
+    return true
 end
 
 local function applyMonitorCamera(index)
     if monitorViewMode ~= 'cctv' then return end
+    if monitorSplitActive then
+        stopMonitorSplitView()
+        if not intercomCam or not DoesCamExist(intercomCam) then
+            local feed = getMonitorFeed(index)
+            if feed then
+                intercomCam = createCamFromFeed(feed)
+            end
+        end
+        if intercomCam and DoesCamExist(intercomCam) then
+            SetCamActive(intercomCam, true)
+            RenderScriptCams(true, false, 0, true, true)
+        end
+    end
 
     local feed, feeds = getMonitorFeed(index)
     if not feed then return end
@@ -835,20 +1159,91 @@ local function buildMonitorUiPayload(opts)
         hasPending = pendingCall ~= nil and not onIntercomCall
     end
 
+    local splitView = monitorSplitActive or opts.splitView == true or shouldUseMonitorSplit()
+    local splitLeftLabel = opts.splitLeftLabel
+    local splitRightLabel = opts.splitRightLabel
+    if splitView and (not splitLeftLabel or not splitRightLabel) then
+        local wideFeed = feeds[getPrimaryWideMonitorFeedIndex()]
+        local citFeed = feeds[getIntegratedMonitorFeedIndex()]
+        splitLeftLabel = splitLeftLabel or (wideFeed and wideFeed.label) or 'CAM-01'
+        splitRightLabel = splitRightLabel or (citFeed and citFeed.label) or 'CIT'
+    end
+
     return {
         caller = opts.caller or pendingCall or 'Nessuna chiamata',
         hasPendingCall = hasPending,
-        canUnlock = opts.canUnlock == true or onIntercomCall,
+        canUnlock = opts.canUnlock == true or (onIntercomCall and hasAnsweredCall),
         camera = feed and feed.label or 'CAM-01',
         activeCamera = feedIndex,
         cameras = buildMonitorCameraList(feeds),
         lockCameras = onIntercomCall,
         dualCamPreview = opts.dualCamPreview == true or dualCamPreviewActive,
+        splitView = splitView,
+        splitLeftLabel = splitLeftLabel,
+        splitRightLabel = splitRightLabel,
     }
 end
 
 local function refreshMonitorUi(opts)
     sendNui('updateIntercom', buildMonitorUiPayload(opts))
+end
+
+local function startDualCamPreview()
+    if Config.MonitorSplitView ~= false then return end
+    if Config.DualCamPreviewOnRing == false then return end
+    if dualCamPreviewActive then return end
+    if not pendingCall or not isViewingCam or monitorViewMode ~= 'cctv' then return end
+
+    local integratedIdx = getIntegratedMonitorFeedIndex()
+    local wideIdx = getPrimaryWideMonitorFeedIndex()
+    if integratedIdx == wideIdx then return end
+
+    dualCamPreviewActive = true
+
+    CreateThread(function()
+        local showIntegrated = false
+        while dualCamPreviewActive do
+            if not pendingCall or not isViewingCam or monitorViewMode ~= 'cctv' then break end
+
+            showIntegrated = not showIntegrated
+            local idx = showIntegrated and integratedIdx or wideIdx
+            applyMonitorCamera(idx)
+            refreshMonitorUi({
+                hasPendingCall = true,
+                activeCamera = idx,
+                dualCamPreview = true,
+            })
+
+            Wait(Config.DualCamPreviewInterval or 3000)
+        end
+
+        dualCamPreviewActive = false
+    end)
+end
+
+local function focusMonitorOnRing(callerName)
+    if not isViewingCam or monitorViewMode ~= 'cctv' then return end
+
+    local integratedIdx = getIntegratedMonitorFeedIndex()
+    activeMonitorCamIndex = integratedIdx
+
+    if refreshMonitorSplitView() then
+        refreshMonitorUi({
+            caller = callerName or pendingCall,
+            hasPendingCall = true,
+            activeCamera = integratedIdx,
+            splitView = true,
+        })
+        return
+    end
+
+    applyMonitorCamera(integratedIdx)
+    refreshMonitorUi({
+        caller = callerName or pendingCall,
+        hasPendingCall = true,
+        activeCamera = integratedIdx,
+    })
+    startDualCamPreview()
 end
 
 local function openPoliceMonitor()
@@ -885,10 +1280,18 @@ local function openPoliceMonitor()
         activeCamera = activeMonitorCamIndex,
     }))
     sendNui('playSound', { sound = 'cctvOn' })
-    setMonitorNuiFocus(true)
+    syncMonitorNuiFocus()
 
     if pendingCall then
-        startDualCamPreview()
+        if refreshMonitorSplitView() then
+            refreshMonitorUi({
+                hasPendingCall = true,
+                activeCamera = activeMonitorCamIndex,
+                splitView = true,
+            })
+        else
+            startDualCamPreview()
+        end
     end
 end
 
@@ -898,7 +1301,15 @@ local function activateIntercomCallView(callerName)
     hasAnsweredCall = true
 
     local feed = getIntercomCallFeed()
-    applyFeedToCamera(feed)
+    refreshMonitorSplitView()
+
+    if not monitorSplitActive then
+        applyFeedToCamera(feed)
+        if intercomCam and DoesCamExist(intercomCam) then
+            SetCamActive(intercomCam, true)
+            RenderScriptCams(true, false, 0, true, true)
+        end
+    end
 
     sendNui('showPolice', buildMonitorUiPayload({
         caller = callerName or 'Sconosciuto',
@@ -906,8 +1317,9 @@ local function activateIntercomCallView(callerName)
         hasPendingCall = false,
         canUnlock = true,
         feed = feed,
+        splitView = monitorSplitActive,
     }))
-    setMonitorNuiFocus(true)
+    syncMonitorNuiFocus()
     startVoiceInputLoop()
     showPoliceVoiceHint()
 end
@@ -942,6 +1354,14 @@ local function openIntercomCall(callerName)
     SetTimecycleModifierStrength(1.2)
     DoScreenFadeIn(400)
 
+    refreshMonitorSplitView()
+    if not monitorSplitActive then
+        if intercomCam and DoesCamExist(intercomCam) then
+            SetCamActive(intercomCam, true)
+            RenderScriptCams(true, false, 0, true, true)
+        end
+    end
+
     playIntercomSound('cctvOn')
     sendNui('showPolice', buildMonitorUiPayload({
         caller = callerName or 'Sconosciuto',
@@ -949,9 +1369,10 @@ local function openIntercomCall(callerName)
         hasPendingCall = false,
         canUnlock = true,
         feed = feed,
+        splitView = monitorSplitActive,
     }))
     sendNui('playSound', { sound = 'cctvOn' })
-    setMonitorNuiFocus(true)
+    syncMonitorNuiFocus()
     startVoiceInputLoop()
     showPoliceVoiceHint()
 end
@@ -1047,6 +1468,7 @@ local function maintainVisualProps()
     if not Config.UseVisualProp or not isNearIntercom() then return end
 
     spawnProp()
+    spawnIntercomLight()
     spawnCctvProps()
 end
 
@@ -1185,6 +1607,27 @@ CreateThread(function()
     end
 end)
 
+CreateThread(function()
+    while true do
+        if Config.IntercomLightEnabled ~= false and isNearIntercom() then
+            if propEntityExists(intercomLightProp) then
+                updateIntercomLightState()
+            end
+
+            if propEntityExists(intercomLightProp) and isIntercomLightTime() then
+                while propEntityExists(intercomLightProp) and isIntercomLightTime() and isNearIntercom() do
+                    drawIntercomLightGlow()
+                    Wait(0)
+                end
+            else
+                Wait(500)
+            end
+        else
+            Wait(Config.IntercomLightUpdateMs or 30000)
+        end
+    end
+end)
+
 RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function()
     bootstrapProps()
 end)
@@ -1209,6 +1652,27 @@ CreateThread(function()
         if isVisitorUiOpen then
             if IsControlJustPressed(0, 194) or IsControlJustPressed(0, 322) then
                 hangUpCall()
+            end
+            Wait(0)
+        else
+            Wait(400)
+        end
+    end
+end)
+
+-- Monitor polizia: ESC chiude; E sblocca durante chiamata vocale (senza focus NUI)
+CreateThread(function()
+    while true do
+        if isViewingCam then
+            if voiceCallActive and monitorViewMode == 'intercom' and hasAnsweredCall then
+                if IsControlJustPressed(0, 38) then
+                    unlockDoorFromMonitor()
+                end
+            end
+
+            if IsControlJustPressed(0, 322) or IsControlJustPressed(0, 200) then
+                playIntercomSound('callEnd')
+                closeMonitor()
             end
             Wait(0)
         else
@@ -1264,9 +1728,7 @@ RegisterNetEvent('intercom:client:voiceCallStarted', function(channel)
     voiceCallActive = true
     enterPrivateCallMode(channel)
     startVoiceInputLoop()
-    if isViewingCam then
-        setMonitorNuiFocus(true)
-    end
+    syncMonitorNuiFocus()
 end)
 
 RegisterNetEvent('intercom:client:voiceCallEnded', function()
@@ -1276,12 +1738,17 @@ RegisterNetEvent('intercom:client:voiceCallEnded', function()
     hidePoliceVoiceHint()
 end)
 
+RegisterNetEvent('intercom:client:doorUnlocked', function()
+    exports['ss-libs']:Notify(Config.VisitorDoorOpenMessage or 'Porta d\'ingresso aperta.', 'success', 8000)
+end)
+
 RegisterNetEvent('intercom:client:callAnswered', function()
     visitorCallAnswered = true
     playIntercomSound('answer')
     sendNui('visitorAnswered')
     sendNui('playSound', { sound = 'answer' })
     showVisitorHint()
+    startVoiceInputLoop()
 end)
 
 RegisterNetEvent('intercom:client:callEnded', function()
@@ -1321,6 +1788,17 @@ end)
 RegisterNUICallback('switchCamera', function(data, cb)
     if not isViewingCam then cb('ok') return end
     stopDualCamPreview()
+    stopMonitorSplitView()
+    if not intercomCam or not DoesCamExist(intercomCam) then
+        local feed = getMonitorFeed(tonumber(data.index) or 1)
+        if feed then
+            intercomCam = createCamFromFeed(feed)
+        end
+    end
+    if intercomCam and DoesCamExist(intercomCam) then
+        SetCamActive(intercomCam, true)
+        RenderScriptCams(true, false, 0, true, true)
+    end
     applyMonitorCamera(tonumber(data.index) or 1)
     cb('ok')
 end)
