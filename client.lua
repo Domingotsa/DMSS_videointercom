@@ -13,6 +13,14 @@ local propZoneActive = false
 local visitorHintActive = false
 local policeVoiceHintActive = false
 local voiceCallActive = false
+local voiceInputActive = false
+local voiceProximityThreadActive = false
+
+-- Controlli microfono da tenere attivi con NUI monitor aperto (PTT pma-voice)
+local VOICE_INPUT_CONTROLS = {
+    249, -- INPUT_PUSH_TO_TALK
+    46,  -- INPUT_SPEECH_ABORT / voce
+}
 
 local Sounds = {
     doorbell = { 'Door_Bell', 'DLC_HEIST_HACKING_SNAKE_SOUNDS' },
@@ -85,19 +93,108 @@ local function hidePoliceVoiceHint()
     lib.hideTextUI()
 end
 
-local function setClientCallChannel(channel)
-    if Config.VoiceEnabled == false then return end
+local function getVoiceResource()
+    return Config.VoiceResource or 'pma-voice'
+end
 
-    local resource = Config.VoiceResource or 'pma-voice'
-    if GetResourceState(resource) ~= 'started' then return end
+local function isVoiceResourceReady()
+    return Config.VoiceEnabled ~= false and GetResourceState(getVoiceResource()) == 'started'
+end
+
+-- Il canale call lo imposta il server (setPlayerCall). Il client limita solo la proximity
+-- così la voce non esce anche in chat vocale normale verso player vicini/lontani.
+local function applyPrivateProximityOverride()
+    if not isVoiceResourceReady() then return end
+
+    local resource = getVoiceResource()
+    pcall(function()
+        exports[resource]:overrideProximityRange(Config.VoiceProximityOverride or 0.01, true)
+    end)
+end
+
+local function clearPrivateProximityOverride()
+    if not isVoiceResourceReady() then return end
 
     pcall(function()
-        if channel and channel > 0 then
-            exports[resource]:setCallChannel(channel)
-        else
-            exports[resource]:setCallChannel(0)
+        exports[getVoiceResource()]:clearProximityOverride()
+    end)
+end
+
+local function leaveClientCallChannel()
+    if not isVoiceResourceReady() then return end
+
+    pcall(function()
+        exports[getVoiceResource()]:removePlayerFromCall()
+    end)
+end
+
+local function startPrivateProximityGuard()
+    if voiceProximityThreadActive then return end
+    voiceProximityThreadActive = true
+
+    CreateThread(function()
+        while voiceProximityThreadActive and voiceCallActive do
+            applyPrivateProximityOverride()
+            Wait(1500)
+        end
+        voiceProximityThreadActive = false
+    end)
+end
+
+local function stopPrivateProximityGuard()
+    voiceProximityThreadActive = false
+end
+
+local function enterPrivateCallMode(_channel)
+    if not isVoiceResourceReady() then return end
+
+    local resource = getVoiceResource()
+    pcall(function()
+        if exports[resource].setCallVolume then
+            exports[resource]:setCallVolume(Config.VoiceCallVolume or 100)
         end
     end)
+
+    applyPrivateProximityOverride()
+    startPrivateProximityGuard()
+end
+
+local function exitPrivateCallMode()
+    stopPrivateProximityGuard()
+    clearPrivateProximityOverride()
+    leaveClientCallChannel()
+end
+
+local function setMonitorNuiFocus(enabled)
+    if enabled then
+        SetNuiFocus(true, true)
+        SetNuiFocusKeepInput(true)
+    else
+        SetNuiFocus(false, false)
+        SetNuiFocusKeepInput(false)
+    end
+end
+
+local function startVoiceInputLoop()
+    if voiceInputActive then return end
+    voiceInputActive = true
+
+    CreateThread(function()
+        while voiceInputActive and voiceCallActive do
+            for i = 1, #VOICE_INPUT_CONTROLS do
+                local control = VOICE_INPUT_CONTROLS[i]
+                EnableControlAction(0, control, true)
+                EnableControlAction(1, control, true)
+                EnableControlAction(2, control, true)
+            end
+            Wait(0)
+        end
+        voiceInputActive = false
+    end)
+end
+
+local function stopVoiceInputLoop()
+    voiceInputActive = false
 end
 
 local function hideVisitorHint()
@@ -137,7 +234,7 @@ local function openVisitorUi()
             closeVisitorUi()
             TriggerServerEvent('intercom:server:callTimeout')
             playIntercomSound('callEnd')
-            exports.ox_lib:notify({ title = 'Citofono', description = 'Nessuna risposta dal centralino.', type = 'error' })
+            exports['ss-libs']:Notify('Nessuna risposta dal centralino.', 'error')
         end
     end)
 end
@@ -149,14 +246,14 @@ local function hangUpCall()
     playIntercomSound('callEnd')
     sendNui('playSound', { sound = 'callEnd' })
     closeVisitorUi()
-    exports.ox_lib:notify({ title = 'Citofono', description = 'Hai riagganciato.', type = 'inform' })
+    exports['ss-libs']:Notify('Hai riagganciato.', 'inform')
 end
 
 local function closeMonitor(skipServer)
     if not isViewingCam then return end
 
     sendNui('hidePolice')
-    SetNuiFocus(false, false)
+    setMonitorNuiFocus(false)
 
     DoScreenFadeOut(300)
     Wait(300)
@@ -181,24 +278,24 @@ end
 
 local function unlockDoorFromMonitor()
     if monitorViewMode ~= 'intercom' or not isViewingCam or not hasAnsweredCall then
-        exports.ox_lib:notify({ title = 'Citofono', description = 'Devi prima rispondere al citofono.', type = 'error' })
+        exports['ss-libs']:Notify('Devi prima rispondere al citofono.', 'error')
         return
     end
 
     TriggerServerEvent('intercom:server:unlockDoor', Config.DoorlockId)
     playIntercomSound('unlock')
     sendNui('playSound', { sound = 'unlock' })
-    exports.ox_lib:notify({ title = 'Citofono', description = 'Serratura sbloccata!', type = 'success' })
+    exports['ss-libs']:Notify('Serratura sbloccata!', 'success')
     closeMonitor()
 end
 
 local function answerPoliceCall()
     if not isPoliceOnDuty() then
-        exports.ox_lib:notify({ title = 'Citofono', description = 'Accesso riservato alla polizia in servizio.', type = 'error' })
+        exports['ss-libs']:Notify('Accesso riservato alla polizia in servizio.', 'error')
         return
     end
     if not pendingCall then
-        exports.ox_lib:notify({ title = 'Citofono', description = 'Nessuna chiamata in corso.', type = 'error' })
+        exports['ss-libs']:Notify('Nessuna chiamata in corso.', 'error')
         return
     end
     TriggerServerEvent('intercom:server:answerCall')
@@ -306,7 +403,7 @@ local function getIntercomTargetOptions()
             onSelect = function()
                 if isVisitorUiOpen then return end
                 if LocalPlayer.state.intercomCooldown then
-                    exports.ox_lib:notify({ title = 'Citofono', description = 'Hai già suonato, attendi un momento.', type = 'error' })
+                    exports['ss-libs']:Notify('Hai già suonato, attendi un momento.', 'error')
                     return
                 end
 
@@ -357,26 +454,37 @@ local function waitAreaReady(x, y, z)
     local interior = GetInteriorAtCoords(x, y, z)
     if interior ~= 0 then
         PinInteriorInMemory(interior)
-        local deadline = GetGameTimer() + 5000
+        local deadline = GetGameTimer() + (Config.InteriorLoadTimeout or 15000)
         while not IsInteriorReady(interior) and GetGameTimer() < deadline do
             Wait(50)
         end
     end
 
-    local deadline = GetGameTimer() + 3000
+    local deadline = GetGameTimer() + 5000
     while not HasCollisionLoadedAroundEntity(cache.ped) and GetGameTimer() < deadline do
         Wait(50)
     end
 end
 
 local function linkPropToInterior(entity, x, y, z)
+    if not entity or not DoesEntityExist(entity) then return end
+
     local interior = GetInteriorAtCoords(x, y, z)
     if interior == 0 then return end
+
+    PinInteriorInMemory(interior)
 
     local room = GetRoomKeyFromEntity(cache.ped)
     if room ~= 0 then
         ForceRoomForEntity(entity, interior, room)
     end
+
+    ResetEntityAlpha(entity)
+    SetEntityVisible(entity, true, false)
+end
+
+local function propEntityExists(entity)
+    return entity and DoesEntityExist(entity)
 end
 
 local function setupPropZone()
@@ -385,16 +493,20 @@ end
 
 local function spawnProp()
     if not Config.UseVisualProp then return false end
-    if intercomProp and DoesEntityExist(intercomProp) then return true end
     if not isNearIntercom() then return false end
+
+    local x, y, z, heading = getPropBaseCoords()
+
+    if propEntityExists(intercomProp) then
+        linkPropToInterior(intercomProp, x, y, z)
+        return true
+    end
 
     cleanupPropZone()
     deleteProp()
-
-    local x, y, z, heading = getPropBaseCoords()
     waitAreaReady(x, y, z)
 
-    if not lib.requestModel(Config.IntercomModel, 5000) then
+    if not lib.requestModel(Config.IntercomModel, 10000) then
         print(('[DMSS_videointercom] Modello non caricato: %s'):format(Config.IntercomModel))
         return false
     end
@@ -439,17 +551,6 @@ local function deleteCctvProps()
         end
     end
     cctvPropEntities = {}
-end
-
-local function cctvPropsReady()
-    if not Config.CctvProps or #Config.CctvProps == 0 then return true end
-    for i = 1, #Config.CctvProps do
-        local entity = cctvPropEntities[i]
-        if not entity or not DoesEntityExist(entity) then
-            return false
-        end
-    end
-    return true
 end
 
 local function getCctvPropPlacement(entry)
@@ -663,7 +764,7 @@ end
 local function openPoliceMonitor()
     if isViewingCam then return end
     if not isPoliceOnDuty() then
-        exports.ox_lib:notify({ title = 'Citofono', description = 'Accesso riservato alla polizia in servizio.', type = 'error' })
+        exports['ss-libs']:Notify('Accesso riservato alla polizia in servizio.', 'error')
         return
     end
 
@@ -693,7 +794,7 @@ local function openPoliceMonitor()
         hasPendingCall = pendingCall ~= nil,
     }))
     sendNui('playSound', { sound = 'cctvOn' })
-    SetNuiFocus(true, true)
+    setMonitorNuiFocus(true)
 end
 
 local function activateIntercomCallView(callerName)
@@ -710,6 +811,8 @@ local function activateIntercomCallView(callerName)
         canUnlock = true,
         feed = feed,
     }))
+    setMonitorNuiFocus(true)
+    startVoiceInputLoop()
     showPoliceVoiceHint()
 end
 
@@ -751,7 +854,8 @@ local function openIntercomCall(callerName)
         feed = feed,
     }))
     sendNui('playSound', { sound = 'cctvOn' })
-    SetNuiFocus(true, true)
+    setMonitorNuiFocus(true)
+    startVoiceInputLoop()
     showPoliceVoiceHint()
 end
 
@@ -759,48 +863,112 @@ local function openCctvMonitor()
     openPoliceMonitor()
 end
 
+local function spawnSingleCctvProp(index, entry)
+    if not entry or not entry.coords then return false end
+
+    local x, y, z, heading, depth = getCctvPropPlacement(entry)
+
+    if not lib.requestModel(entry.model, 10000) then
+        print(('[DMSS_videointercom] CCTV modello non caricato: %s'):format(entry.model))
+        return false
+    end
+
+    local entity = CreateObject(entry.model, x, y, z, false, false, false)
+    if not entity or entity == 0 or not DoesEntityExist(entity) then
+        SetModelAsNoLongerNeeded(entry.model)
+        return false
+    end
+
+    SetEntityAsMissionEntity(entity, true, true)
+    SetEntityCoordsNoOffset(entity, x, y, z, false, false, false)
+    applyEntityRotation(entity, heading, entry.rotation)
+    applyEntityDepth(entity, depth)
+
+    local finalPos = GetEntityCoords(entity)
+    ResetEntityAlpha(entity)
+    SetEntityVisible(entity, true, false)
+    SetEntityCollision(entity, false, false)
+    FreezeEntityPosition(entity, true)
+    SetEntityInvincible(entity, true)
+    SetEntityLodDist(entity, 500)
+    linkPropToInterior(entity, finalPos.x, finalPos.y, finalPos.z)
+    cctvPropEntities[index] = entity
+    SetModelAsNoLongerNeeded(entry.model)
+
+    if Config.Debug then
+        print(('[DMSS_videointercom] CCTV [%d] prop a %.2f, %.2f, %.2f'):format(
+            index, finalPos.x, finalPos.y, finalPos.z
+        ))
+    end
+
+    return true
+end
+
 local function spawnCctvProps()
     if not Config.UseVisualProp or not Config.CctvProps then return end
 
-    deleteCctvProps()
+    local baseX, baseY, baseZ = getPropBaseCoords()
+    waitAreaReady(baseX, baseY, baseZ)
 
     for i = 1, #Config.CctvProps do
         local entry = Config.CctvProps[i]
         if not entry.coords then
             print(('[DMSS_videointercom] CCTV [%d] senza coords in config'):format(i))
+        elseif not propEntityExists(cctvPropEntities[i]) then
+            spawnSingleCctvProp(i, entry)
         else
-            local x, y, z, heading, depth = getCctvPropPlacement(entry)
-
-            if lib.requestModel(entry.model, 5000) then
-                local entity = CreateObject(entry.model, x, y, z, false, false, false)
-                if entity and entity ~= 0 and DoesEntityExist(entity) then
-                    SetEntityAsMissionEntity(entity, true, true)
-                    SetEntityCoordsNoOffset(entity, x, y, z, false, false, false)
-                    applyEntityRotation(entity, heading, entry.rotation)
-                    applyEntityDepth(entity, depth)
-
-                    local finalPos = GetEntityCoords(entity)
-                    ResetEntityAlpha(entity)
-                    SetEntityVisible(entity, true, false)
-                    SetEntityCollision(entity, false, false)
-                    FreezeEntityPosition(entity, true)
-                    SetEntityInvincible(entity, true)
-                    SetEntityLodDist(entity, 500)
-                    linkPropToInterior(entity, finalPos.x, finalPos.y, finalPos.z)
-                    cctvPropEntities[i] = entity
-
-                    if Config.Debug then
-                        print(('[DMSS_videointercom] CCTV [%d] prop a %.2f, %.2f, %.2f'):format(
-                            i, finalPos.x, finalPos.y, finalPos.z
-                        ))
-                    end
-                end
-                SetModelAsNoLongerNeeded(entry.model)
-            else
-                print(('[DMSS_videointercom] CCTV modello non caricato: %s'):format(entry.model))
-            end
+            local x, y, z = getCctvPropPlacement(entry)
+            linkPropToInterior(cctvPropEntities[i], x, y, z)
         end
     end
+end
+
+local function arePropsSpawned()
+    if not Config.UseVisualProp then return true end
+    if not propEntityExists(intercomProp) then return false end
+    if not Config.CctvProps then return true end
+
+    for i = 1, #Config.CctvProps do
+        if Config.CctvProps[i].coords and not propEntityExists(cctvPropEntities[i]) then
+            return false
+        end
+    end
+
+    return true
+end
+
+local function maintainVisualProps()
+    if not Config.UseVisualProp or not isNearIntercom() then return end
+
+    spawnProp()
+    spawnCctvProps()
+end
+
+local function bootstrapProps()
+    CreateThread(function()
+        local attempts = Config.SpawnMaxAttempts or 15
+        local delay = Config.SpawnRetryDelay or 2500
+
+        for _ = 1, attempts do
+            if isNearIntercom() then
+                maintainVisualProps()
+                setupPropZone()
+
+                if arePropsSpawned() then
+                    if Config.Debug then
+                        print('[DMSS_videointercom] Prop inizializzati correttamente')
+                    end
+                    return
+                end
+            end
+
+            Wait(delay)
+        end
+
+        if Config.Debug then
+            print('[DMSS_videointercom] Bootstrap prop terminato, manutenzione automatica attiva')
+        end
+    end)
 end
 
 local function getCamPosition()
@@ -879,8 +1047,9 @@ end
 local function cleanupIntercom()
     if isViewingCam then closeMonitor(true) end
     closeVisitorUi()
-    SetNuiFocus(false, false)
-    setClientCallChannel(0)
+    setMonitorNuiFocus(false)
+    stopVoiceInputLoop()
+    exitPrivateCallMode()
     hidePoliceVoiceHint()
     voiceCallActive = false
     deleteProp()
@@ -898,25 +1067,34 @@ CreateThread(function()
 
     setupPoliceMonitor()
     setupPropZone()
-
-    if isNearIntercom() then
-        spawnProp()
-        spawnCctvProps()
-    end
+    bootstrapProps()
 
     while true do
         if Config.UseVisualProp and isNearIntercom() then
-            if not intercomProp or not DoesEntityExist(intercomProp) then
-                spawnProp()
-            end
-            if not cctvPropsReady() then
-                spawnCctvProps()
-            end
-            Wait(2000)
+            maintainVisualProps()
+            Wait(Config.SpawnMaintainInterval or 2000)
         else
             Wait(3000)
         end
     end
+end)
+
+RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function()
+    bootstrapProps()
+end)
+
+RegisterNetEvent('qbx_core:client:playerLoaded', function()
+    bootstrapProps()
+end)
+
+AddEventHandler('onResourceStart', function(resourceName)
+    if resourceName ~= GetCurrentResourceName() then return end
+    if not NetworkIsSessionStarted() then return end
+
+    CreateThread(function()
+        Wait(1500)
+        bootstrapProps()
+    end)
 end)
 
 -- Tasti riaggancia durante chiamata (player libero di muoversi)
@@ -943,7 +1121,7 @@ end, false)
 
 RegisterCommand('intercomrefresh', function()
     refreshAll()
-    exports.ox_lib:notify({ title = 'Citofono', description = 'Citofono aggiornato', type = 'success' })
+    exports['ss-libs']:Notify('Citofono aggiornato', 'success')
 end, false)
 
 AddEventHandler('onResourceStop', function(resource)
@@ -955,12 +1133,7 @@ RegisterNetEvent('intercom:client:incomingCall', function(callerName)
     pendingCall = callerName
     playIntercomSound('doorbell')
     sendNui('playSound', { sound = 'doorbell' })
-    exports.ox_lib:notify({
-        title = '🔔 CITOFONO CENTRALINO',
-        description = ('**%s** sta suonando! Apri il monitor e rispondi.'):format(callerName),
-        type = 'warning',
-        duration = 10000,
-    })
+    exports['ss-libs']:Notify(('🔔 CITOFONO · sta suonando! Apri il monitor e rispondi.'):format(callerName), 'warning', 10000)
 
     if isViewingCam and monitorViewMode == 'cctv' then
         refreshMonitorUi({
@@ -985,12 +1158,17 @@ RegisterNetEvent('intercom:client:closeMonitor', closeMonitor)
 
 RegisterNetEvent('intercom:client:voiceCallStarted', function(channel)
     voiceCallActive = true
-    setClientCallChannel(channel)
+    enterPrivateCallMode(channel)
+    startVoiceInputLoop()
+    if isViewingCam then
+        setMonitorNuiFocus(true)
+    end
 end)
 
 RegisterNetEvent('intercom:client:voiceCallEnded', function()
     voiceCallActive = false
-    setClientCallChannel(0)
+    stopVoiceInputLoop()
+    exitPrivateCallMode()
     hidePoliceVoiceHint()
 end)
 
@@ -1014,13 +1192,13 @@ RegisterNetEvent('intercom:client:forceCloseMonitor', function()
     if not isViewingCam then return end
     playIntercomSound('callEnd')
     closeMonitor(true)
-    exports.ox_lib:notify({ title = 'Citofono', description = 'Il visitatore ha riagganciato.', type = 'inform' })
+    exports['ss-libs']:Notify('Il visitatore ha riagganciato.', 'inform')
 end)
 
 RegisterNetEvent('intercom:client:visitorHungUp', function()
     pendingCall = nil
     if not isViewingCam then
-        exports.ox_lib:notify({ title = 'Citofono', description = 'Il visitatore ha riagganciato.', type = 'inform' })
+        exports['ss-libs']:Notify('Il visitatore ha riagganciato.', 'inform')
     end
 end)
 
@@ -1029,7 +1207,7 @@ RegisterNUICallback('unlockDoor', function(_, cb) unlockDoorFromMonitor() cb('ok
 RegisterNUICallback('closeMonitor', function(_, cb) playIntercomSound('callEnd') closeMonitor() cb('ok') end)
 RegisterNUICallback('answerCall', function(_, cb)
     if not isPoliceOnDuty() then
-        exports.ox_lib:notify({ title = 'Citofono', description = 'Accesso riservato alla polizia in servizio.', type = 'error' })
+        exports['ss-libs']:Notify('Accesso riservato alla polizia in servizio.', 'error')
         cb('ok')
         return
     end

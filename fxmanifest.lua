@@ -32,5 +32,6 @@ dependencies {
     'qbx_core',
     'ox_lib',
     'ox_target',
-    'ox_doorlock'
+    'ox_doorlock',
+    'ss-libs',
 }

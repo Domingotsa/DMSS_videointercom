@@ -7,6 +7,15 @@ local lastCaller = {
 
 local answeredByPolice = nil
 local activeVoiceCall = nil
+local callChannelSeq = 50000
+
+local function allocCallChannel()
+    callChannelSeq = callChannelSeq + 1
+    if callChannelSeq > 65530 then
+        callChannelSeq = 50001
+    end
+    return callChannelSeq
+end
 
 local function getVoiceResource()
     return Config.VoiceResource or 'pma-voice'
@@ -48,7 +57,7 @@ local function startVoiceCall(callerSrc, policeSrc)
 
     endVoiceCall()
 
-    local channel = callerSrc
+    local channel = allocCallChannel()
     activeVoiceCall = {
         caller = callerSrc,
         police = policeSrc,
