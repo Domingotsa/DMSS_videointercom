@@ -8,7 +8,7 @@ Config.IntercomProp = vec4(5611.8848, -3122.9387, 8.6942, 268.0362)
 
 Config.PropDepth = -0.02
 
-Config.PropOffset = vec3(0.0, 0.35, 0.5)
+Config.PropOffset = vec3(0.0, 0.30, 0.5)
 
 Config.PropRotation = vec3(0.0, 0.0, 0.0)
 
@@ -22,6 +22,16 @@ Config.InteractRadius = 2.0
 
 Config.SpawnDistance = 80.0
 
+-- Attesa caricamento MLO/interior prima dello spawn (ms)
+
+Config.InteriorLoadTimeout = 15000
+
+Config.SpawnMaxAttempts = 15
+
+Config.SpawnRetryDelay = 2500
+
+Config.SpawnMaintainInterval = 2000
+
 
 
 -- ── Telecamere CCTV ─────────────────────────────────────────────────
@@ -30,7 +40,7 @@ Config.CctvProps = {
 
     {
 
-        label = 'CAM-01 · INGRESSO SX',
+        label = 'CAM-01 · INGRESSO CITOFONO',
 
         model = `prop_cctv_cam_04a`,
 
@@ -42,11 +52,11 @@ Config.CctvProps = {
 
         rotation = vec3(0.0, 0.0, 0.0),
 
-        feedView = vec4(5611.4189, -3122.3662, 12.8084, 268.0),
+        feedView = vec4(5611.0845, -3122.1223, 12.9319, 163.8805),
 
-        feedPitch = -12.0,
+        feedPitch = -85.0,
 
-        feedFov = 55.0,
+        feedFov = 60.0,
 
         intercomFeed = true,
 
@@ -60,7 +70,7 @@ Config.CctvProps = {
 
         model = `prop_cctv_pole_04`,
 
-        coords = vec4(5629.5938, -3128.6658, 11.1480, 273.2512),
+        coords = vec4(5615.1562, -3119.0627, 10.8450, 105.0),
 
         propOffset = vec3(0.0, 0.0, 0.0),
 
@@ -68,9 +78,9 @@ Config.CctvProps = {
 
         rotation = vec3(0.0, 0.0, 0.0),
 
-        feedView = vec4(5611.88, -3124.50, 9.00, 105.0),
+        feedView = vec4(5615.6694, -3119.4661, 16.5735, 226.8939),
 
-        feedPitch = -8.0,
+        feedPitch = -30.0,
 
         feedFov = 60.0,
 
@@ -100,7 +110,7 @@ Config.PoliceJob = 'police'
 
 Config.PoliceRequireDuty = true
 
-Config.PoliceMonitor = vec4(5627.8, -3135.5, 11.1454, 275.0)
+Config.PoliceMonitor = vec4(5639.2100, -3137.3723, 11.1186, 125.0196)
 
 Config.PoliceMonitorOffset = vec3(0.0, 0.0, 0.0)
 
@@ -108,7 +118,7 @@ Config.PoliceMonitorRadius = 2.5
 
 
 
-Config.DoorlockId = 1
+Config.DoorlockId = 1152
 
 Config.LocationLabel = 'Centralino'
 
@@ -119,6 +129,13 @@ Config.VisitorTimeout = 60000
 Config.VoiceEnabled = true
 
 Config.VoiceResource = 'pma-voice'
+
+Config.VoiceCallVolume = 100
+
+-- Metri proximity durante chiamata: la voce va SOLO sul canale call (visitatore <-> polizia).
+-- 0.01 = praticamente zero leak in proximity. Richiede server.cfg: setr voice_enableCalls 1
+
+Config.VoiceProximityOverride = 0.01
 
 Config.Debug = false
 
