@@ -133,14 +133,6 @@ Config.CctvProps = {
 
 
 
--- Alterna CIT + CAM-01 sul monitor mentre suona il citofono (entrambe visibili a rotazione)
-
-Config.DualCamPreviewOnRing = true
-
-Config.DualCamPreviewInterval = 3000
-
-
-
 -- intercomFeed: telecamera usata quando si risponde al citofono
 
 -- monitorFeed: telecamere visibili nel monitor di sorveglianza
@@ -174,12 +166,6 @@ Config.LocationLabel = 'Centralino'
 Config.VisitorTimeout = 60000
 
 Config.VisitorDoorOpenMessage = 'Porta d\'ingresso aperta.'
-
--- Monitor polizia: CAM-01 e videocitofono affiancati durante chiamata
-
-Config.MonitorSplitView = true
-
-Config.MonitorSidebarPx = 280
 
 -- Comunicazione vocale durante la chiamata citofono (pma-voice)
 

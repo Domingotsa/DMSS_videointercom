@@ -17,10 +17,6 @@ const btnAnswer = document.getElementById('btn-answer');
 const btnUnlock = document.getElementById('btn-unlock');
 const btnClose = document.getElementById('btn-close');
 const visitorHangupHint = document.getElementById('visitor-hangup-hint');
-const dualCamBadge = document.getElementById('dual-cam-badge');
-const splitView = document.getElementById('split-view');
-const splitLeftLabel = document.getElementById('split-left-label');
-const splitRightLabel = document.getElementById('split-right-label');
 const barBtnAnswer = document.getElementById('bar-btn-answer');
 const barBtnUnlock = document.getElementById('bar-btn-unlock');
 const barBtnClose = document.getElementById('bar-btn-close');
@@ -139,21 +135,6 @@ function setAnswerVisible(visible) {
     if (barBtnAnswer) barBtnAnswer.classList.toggle('hidden', !visible);
 }
 
-function setSplitView(data) {
-    const enabled = data.splitView === true;
-    if (splitView) splitView.classList.toggle('hidden', !enabled);
-    if (enabled) {
-        if (splitLeftLabel && data.splitLeftLabel) splitLeftLabel.textContent = data.splitLeftLabel;
-        if (splitRightLabel && data.splitRightLabel) splitRightLabel.textContent = data.splitRightLabel;
-        if (dualCamBadge) {
-            dualCamBadge.textContent = 'SPLIT · CAM + CIT';
-            dualCamBadge.classList.remove('hidden');
-        }
-    } else if (dualCamBadge && data.dualCamPreview !== true) {
-        dualCamBadge.classList.add('hidden');
-    }
-}
-
 function showVisitor(data) {
     visitorDevice.classList.remove('answered');
     visitorLedRed.classList.add('active');
@@ -200,16 +181,9 @@ function renderCameraList(cameras, activeIndex) {
     });
 }
 
-function setDualCamPreview(enabled) {
-    if (!dualCamBadge || (splitView && !splitView.classList.contains('hidden'))) return;
-    dualCamBadge.classList.toggle('hidden', !enabled);
-    if (enabled) dualCamBadge.textContent = 'AUTO · CIT + CAM-01';
-}
-
 function updatePoliceCamera(data) {
     policeCamId.textContent = data.camera || policeCamId.textContent;
     if (data.lockCameras !== undefined) camerasLocked = data.lockCameras === true;
-    if (data.dualCamPreview !== undefined) setDualCamPreview(data.dualCamPreview === true);
     renderCameraList(data.cameras, data.activeCamera);
 }
 
@@ -235,24 +209,16 @@ function updateIntercomUi(data) {
         }
     }
 
-    if (data.dualCamPreview !== undefined) {
-        setDualCamPreview(data.dualCamPreview === true);
-    }
-
-    if (data.splitView !== undefined) {
-        setSplitView(data);
+    if (data.camera) {
+        policeCamId.textContent = data.camera;
     }
 }
 
 function showPolice(data) {
     camerasLocked = data.lockCameras === true;
-    setDualCamPreview(data.dualCamPreview === true);
-    setSplitView(data);
 
     policeCaller.textContent = data.caller || 'Nessuna chiamata';
-    policeCamId.textContent = data.splitView
-        ? 'SPLIT · CAM + CIT'
-        : (data.camera || 'CAM-01 · INGRESSO SX');
+    policeCamId.textContent = data.camera || 'CAM-01 · INGRESSO SX';
 
     if (policeCallerHint) {
         if (data.canUnlock) {
@@ -277,9 +243,6 @@ function hidePolice() {
     policePanel.classList.add('hidden');
     setAnswerVisible(false);
     setUnlockEnabled(false);
-    setDualCamPreview(false);
-    if (splitView) splitView.classList.add('hidden');
-    if (dualCamBadge) dualCamBadge.classList.add('hidden');
     camerasLocked = false;
     if (cameraList) cameraList.innerHTML = '';
     stopPoliceClock();

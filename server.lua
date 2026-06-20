@@ -2,7 +2,6 @@ local qbx = exports.qbx_core
 
 local lastCaller = {
     src = nil,
-    name = nil,
 }
 
 local answeredByPolice = nil
@@ -118,7 +117,7 @@ local function resetCallState(opts)
         TriggerClientEvent('intercom:client:forceCloseMonitor', answeredByPolice)
     end
 
-    lastCaller = { src = nil, name = nil }
+    lastCaller = { src = nil }
     answeredByPolice = nil
     clearPolicePendingCall()
 end
@@ -141,7 +140,6 @@ local function connectIntercomCall(policeSrc)
     if not lastCaller.src then return false end
 
     local callerSrc = lastCaller.src
-    local callerName = lastCaller.name
 
     TriggerClientEvent('intercom:client:callAnswered', callerSrc)
     TriggerClientEvent('intercom:client:playSound', policeSrc, 'answer')
@@ -154,7 +152,7 @@ local function connectIntercomCall(policeSrc)
     -- Apri il monitor dopo l'avvio del canale vocale (evita race con pma-voice / PTT)
     SetTimeout(250, function()
         if answeredByPolice ~= policeSrc then return end
-        TriggerClientEvent('intercom:client:openMonitor', policeSrc, callerName)
+        TriggerClientEvent('intercom:client:openMonitor', policeSrc)
     end)
 
     return true
@@ -166,13 +164,16 @@ RegisterNetEvent('intercom:server:ringDoorbell', function()
 
     if not player then return end
 
-    local charInfo = player.PlayerData.charinfo
-    local callerName = charInfo.firstname .. ' ' .. charInfo.lastname
+    -- Stesso visitatore: aggiorna la chiamata in attesa (evita blocco se UI chiusa per desync)
+    if lastCaller.src == src then
+        notifyOnDutyPolice('intercom:client:incomingCall')
+        return
+    end
 
-    lastCaller = { src = src, name = callerName }
+    lastCaller = { src = src }
     answeredByPolice = nil
 
-    notifyOnDutyPolice('intercom:client:incomingCall', callerName)
+    notifyOnDutyPolice('intercom:client:incomingCall')
 end)
 
 RegisterNetEvent('intercom:server:answerCall', function()
